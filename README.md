@@ -1,138 +1,197 @@
 # Warema WMS Home Assistant Integration
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub Release](https://img.shields.io/github/release/mike-goldfinger/ha-warema-wms.svg?style=flat-square&label=Release)](https://github.com/mike-goldfinger/ha-warema-wms/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Maintenance](https://img.shields.io/badge/Maintenance-Active-green.svg)](https://github.com/mike-goldfinger/ha-warema-wms)
 
-A Home Assistant custom integration for the **Warema WMS** (WAREMA Mobile System) radio control system, using a **WMS USB Stick** (FTDI FT232R).
+<p align="center">
+  <a href="https://github.com/mike-goldfinger/ha-warema-wms" target="_blank">
+    Control your Warema WMS venetian blinds and stores through Home Assistant
+  </a>
+</p>
 
-## Repository Structure
+---
 
-```
-pywarema/                    # Python library (serial protocol)
-  __init__.py
-  protocol.py                # Frame encoding/decoding
-  stick.py                   # WmsStick controller class
+## ✨ Features
 
-custom_components/
-  warema_wms/                # Home Assistant custom integration
-    __init__.py
-    config_flow.py           # UI config flow
-    const.py                 # Constants
-    coordinator.py           # WMS ↔ HA bridge
-    cover.py                 # Cover entities
-    manifest.json
-    strings.json
-    translations/
-      en.json
+- 🪟 **Full blind control** — Open, close, stop, set position and tilt angle
+- 📊 **Real-time monitoring** — Position, angle, and motion detection sensors
+- 🔌 **USB auto-detection** — Plug in your Warema WMS Stick and go
+- ⚙️ **Easy setup wizard** — Multiple discovery methods (manual, Wandsender pairing, new network)
+- 🌍 **Multiple device support** — Works with Type 20, 21, 25, and 2E actuators
+- 🎯 **Native Home Assistant integration** — Full cover entity support with all features
+- 🔐 **Local control only** — No cloud dependency, all communication is local
 
-hacs.json                    # HACS compatibility
-```
+---
 
-## Prerequisites
+## 📷 Screenshots
 
-- A fully installed Warema WMS network
-- Warema WMS USB Stick (FTDI FT232R)
-- WMS network parameters: **channel**, **PAN ID**, **network key**
-  - Obtain these using the WMS Hand-held transmitter (see JS library README)
-- Home Assistant (2023.1.0+)
+**Configuration Flow — Wandsender Pairing**
+![Wandsender Pairing](docs/screenshots/wandsender-pairing.png)
 
-## Hardware
+**Device Control — Blind in Home Assistant**
+![Device Control](docs/screenshots/device-control.png)
 
-The WMS USB Stick uses:
-- **Baud rate**: 125,000
-- **Protocol**: ASCII frames delimited by `}`
-- **Typical path**: `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K28M2-if00-port0`
+---
 
-## Installation
+## 🚀 Installation
 
-### HACS (Recommended)
+### Via HACS (Recommended)
 
-1. Open Home Assistant and go to **Settings** → **Devices & Services** → **Integrations**
-2. Click the **Create Automation** button (or add via HACS)
-3. Search for and install **Warema WMS**
+1. Open **HACS** in Home Assistant
+2. Go to **Integrations** and search for **Warema WMS**
+3. Click **Install**
 4. Restart Home Assistant
-5. Add the integration via **Settings** → **Devices & Services** → **Create Automation** and search for "Warema WMS"
+5. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
 
-### Manual
+### Manual Installation
 
 1. Copy `custom_components/warema_wms/` to your HA `custom_components/` directory
-2. Copy `pywarema/` to a location accessible by HA (or install as a package)
-3. Restart Home Assistant
+2. Restart Home Assistant
+3. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
 
-### Python Library Dependency
+> **Note:** The `pywarema` library is bundled inside — no separate installation needed.
 
-The integration requires the `pywarema` library. Install it:
+---
 
-```bash
-pip install pyserial>=3.5
-```
+## ⚙️ Configuration
 
-The `pywarema` package in this repo must be accessible to Home Assistant. The simplest approach for HA Green is to place the `pywarema/` folder alongside `custom_components/` in your HA config directory.
+The integration uses a **configuration flow** with auto-detection and multiple setup options.
 
-## Configuration
+### Automatic Detection
+Plug in your Warema WMS USB Stick (FTDI FT232R) and Home Assistant will notify you to start the setup wizard.
 
-1. Go to **Settings** → **Devices & Services** → **Add Integration**
-2. Search for **Warema WMS**
-3. Enter:
-   - **Serial Port**: Path to WMS USB Stick (e.g. `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K28M2-if00-port0`)
-   - **Channel**: WMS network channel (1-26)
-   - **PAN ID**: 4-character hex (e.g. `ABCD`)
-   - **Network Key**: 32-character hex
-   - **Scan Interval**: Position polling interval in seconds (default: 30)
-4. The integration will connect, scan for devices, and let you select which blinds to add
+### Setup Wizard
 
-## Getting WMS Network Parameters
+**Step 1: Serial Port Selection**
+- Auto-scans for connected USB sticks
+- Or enter port path manually (e.g., `/dev/ttyUSB0`, `COM5`)
 
-If you don't know your network parameters, use the JS library's network parameter discovery:
+**Step 2: Network Discovery Method**
 
-```bash
-cd /path/to/node_modules/warema-wms-venetian-blinds
-node lib/wms-vb_test-get-network-params.js
-```
+| Method | Use When | How It Works |
+|--------|----------|-------------|
+| **Enter manually** | You know your channel, PAN ID & key | Type in parameters directly |
+| **Wandsender pairing** | You have an existing network | Wizard captures parameters from transmitter |
+| **Create new network** | You want a fresh network | Wizard generates new credentials |
 
-Follow the on-screen instructions with your WMS Hand-held transmitter.
+**Step 3: Select Devices**
+- Auto-scans for blinds on the network
+- Multi-select which ones to add
 
-## Supported Device Types
+> **No network parameters needed upfront** — the wizard handles everything!
+
+---
+
+## 🎯 Supported Devices
 
 | Type | Description |
 |------|-------------|
-| 20   | Actuator UP |
-| 21   | Plug receiver |
-| 25   | Radio motor |
-| 2E   | Actuator 230V UP |
+| **20** | Actuator UP |
+| **21** | Plug receiver |
+| **25** | Radio motor |
+| **2E** | Actuator 230V UP |
 
-## Cover Entity Features
+## 🏠 Hardware Requirements
 
-Each blind is exposed as a `cover` entity with:
+- **Warema WMS USB Stick** (FTDI FT232R, USB VID: 0403, PID: 6001)
+- **Supported blinds:** Type 20, 21, 25, or 2E actuators
+- **Home Assistant:** 2023.1.0 or later
+- **Python:** 3.9+
 
-| Feature | Description |
-|---------|-------------|
-| Open | Move to fully open (position 0) |
-| Close | Move to fully closed (position 100) |
-| Stop | Stop current movement |
-| Set Position | Move to specific position (0-100%) |
-| Open Tilt | Set slats to fully outward (+100°) |
-| Close Tilt | Set slats to fully inward (-100°) |
-| Set Tilt Position | Set slat angle (0-100%) |
+---
 
-### Position Convention
+## 📊 Entities & Features
 
-- **HA**: 0 = closed, 100 = open
-- **WMS**: 0 = open, 100 = closed
-- The integration automatically converts between the two.
+### Cover Entity
+Each blind appears as a `cover` entity with:
 
-### Tilt Convention
+| Control | Range | Notes |
+|---------|-------|-------|
+| **Position** | 0–100% | 0 = closed, 100 = open |
+| **Tilt** | 0–100% | 0 = fully closed, 50 = horizontal, 100 = open |
+| **Open** | — | Move to fully open |
+| **Close** | — | Move to fully closed |
+| **Stop** | — | Stop current movement |
 
-- **HA**: 0 = fully down/inward, 50 = horizontal, 100 = fully up/outward
-- **WMS**: -100 = fully inward, 0 = horizontal, +100 = fully outward
+### Sensor Entities
+- **Motor SNR** — Serial number (6-digit hex)
+- **WMS Position** — Raw position from device
+- **WMS Angle** — Raw tilt angle from device
 
-## Protocol Details
+### Binary Sensor Entities
+- **Moving** — `on` if blind is moving, `off` if stopped
+
+> All entities are auto-discovered and named from the device's internal name.
+
+---
+
+## 🔄 Adding More Blinds Later
+
+Go to the integration's **Configure** dialog to:
+- Re-scan the network
+- Add blinds that joined after initial setup
+- Existing entities keep their history
+
+---
+
+## 💡 Position & Tilt Conventions
+
+Home Assistant uses different conventions than WMS:
+
+**Position**
+- Home Assistant: 0 = closed, 100 = open
+- WMS: 0 = open, 100 = closed
+- → Automatically converted by the integration
+
+**Tilt**
+- Home Assistant: 0 = fully closed, 50 = horizontal, 100 = fully open
+- WMS: −100 = fully closed, 0 = horizontal, +100 = fully open
+- → Formula: `HA_tilt = (100 − WMS_angle) / 2`
+
+---
+
+## 🐛 Known Issues
+
+This is a **beta release** with known architectural limitations:
+
+- **Race conditions** between dispatcher and entity registration (documented in `ARCHITECTURE_ISSUES.md`)
+- **Edge case:** Position updates may arrive before entity registration completes
+- **Impact:** Rare, occasional delayed updates on first control
+- **Planned fix:** Refactoring to use Home Assistant's `DataUpdateCoordinator` pattern in v1.1.0
+
+See `ARCHITECTURE_ISSUES.md` for technical details and planned improvements.
+
+---
+
+## 🤝 Support & Contribution
+
+### Issues & Bugs
+Found a problem? Please report it on [GitHub Issues](https://github.com/mike-goldfinger/ha-warema-wms/issues) with:
+- Error logs from Home Assistant
+- Your hardware setup (device types, OS)
+- Steps to reproduce
+
+### Feature Requests
+Have an idea? Share it on [GitHub Discussions](https://github.com/mike-goldfinger/ha-warema-wms/discussions)
+
+### Want to Help?
+Contributions are welcome! See `CONTRIBUTING.md` for:
+- Development setup
+- Code quality standards (Black, Pylint)
+- Testing requirements
+- Pull request guidelines
+
+---
+
+## 📚 Advanced: Protocol Details
 
 The WMS protocol uses ASCII frames over serial at 125,000 baud:
 
 ```
 {G}                          → Get stick name
-{V}                          → Get stick version
+{V}                          → Get stick version  
 {K401<32-hex-key>}           → Set network key
 {M%<channel><panid>}         → Switch channel/PAN
 {R04FFFFFF7020<panid>02}     → Scan for devices
@@ -141,34 +200,24 @@ The WMS protocol uses ASCII frames over serial at 125,000 baud:
 {R06<snr>70700 1FFFFFFFFFF00}  → Stop blind
 ```
 
-Responses are prefixed with `{r`, `{a}`, `{g`, `{v`, or `{f}`.
+Responses use prefixes: `{r`, `{a}`, `{g`, `{v`, `{f}`
 
-## Extra State Attributes
+---
 
-Each cover entity exposes:
-- `snr`: Integer serial number
-- `snr_hex`: 6-character hex serial number (wire format)
-- `device_type`: Device type code
-- `device_type_str`: Human-readable device type
-- `wms_position`: Raw WMS position (0-100)
-- `wms_angle`: Raw WMS angle (-100 to +100)
+## 📜 License
 
-## Known Issues
+This project is licensed under the **MIT License** — see `LICENSE` for details.
 
-This is a **beta release** with known architectural issues:
+## 🙏 Credits
 
-- **Race Conditions**: Entity position updates may arrive via dispatcher before entity registration completes in Home Assistant, causing occasional delayed or missed initial updates
-- **Impact**: Rare edge case when blinds are first controlled; generally does not affect normal operation
-- **Planned Fix**: Refactoring to use Home Assistant's `DataUpdateCoordinator` pattern in v1.1.0 (see `ARCHITECTURE_ISSUES.md` for details)
+- **Protocol** reverse-engineered from the JavaScript [warema-wms-venetian-blinds](https://www.npmjs.com/package/warema-wms-venetian-blinds) package
+- **Original research** by "Pman" and "willjoha" on the ioBroker forum
+- **Home Assistant community** for the excellent integration framework
 
-Please report any issues or unexpected behavior in the [GitHub issue tracker](https://github.com/mike-goldfinger/ha-warema-wms/issues).
+---
 
-## Credits
+**Made with ❤️ for Home Assistant**
 
-Protocol reverse-engineered from the JavaScript [warema-wms-venetian-blinds](https://www.npmjs.com/package/warema-wms-venetian-blinds) npm package.
-
-Original JS credits: "Pman" and "willjoha" on the ioBroker forum.
-
-## License
-
-MIT
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2023.1+-blue?logo=home-assistant&logoColor=white)](https://www.home-assistant.io/)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![HACS](https://img.shields.io/badge/HACS-Community-orange)](https://hacs.xyz/)
