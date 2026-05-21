@@ -21,6 +21,7 @@
 - ⚙️ **Easy setup wizard** — Multiple discovery methods (manual, Wandsender pairing, new network)
 - 🌍 **Multiple device support** — Works with Type 20, 21, 25, and 2E actuators
 - 🎯 **Native Home Assistant integration** — Full cover entity support with all features
+- 🐍 **Native Python integration** — Pure Python, no external bridge, add-on or MQTT broker required
 - 🔐 **Local control only** — No cloud dependency, all communication is local
 
 ---
@@ -37,11 +38,27 @@
 
 ## 🚀 Installation
 
-### Via HACS (Recommended)
+### Via HACS — Custom Repository (current method)
+
+Until this integration is accepted into the HACS default store, add it as a **custom repository**:
+
+1. Open **HACS** in Home Assistant
+2. Click the **⋮** menu (top right) → **Custom repositories**
+3. Enter:
+   - **Repository:** `https://github.com/mike-goldfinger/ha-warema-wms`
+   - **Category:** `Integration`
+4. Click **Add**
+5. Search for **Warema WMS** in HACS and click **Download**
+6. Restart Home Assistant
+7. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
+
+### Via HACS — Default Store (once accepted)
+
+Once the integration is part of the HACS default store:
 
 1. Open **HACS** in Home Assistant
 2. Go to **Integrations** and search for **Warema WMS**
-3. Click **Install**
+3. Click **Download**
 4. Restart Home Assistant
 5. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
 
@@ -149,19 +166,6 @@ Home Assistant uses different conventions than WMS:
 - Home Assistant: 0 = fully closed, 50 = horizontal, 100 = fully open
 - WMS: −100 = fully closed, 0 = horizontal, +100 = fully open
 - → Formula: `HA_tilt = (100 − WMS_angle) / 2`
-
----
-
-## 🐛 Known Issues
-
-This is a **beta release** with known architectural limitations:
-
-- **Race conditions** between dispatcher and entity registration (documented in `ARCHITECTURE_ISSUES.md`)
-- **Edge case:** Position updates may arrive before entity registration completes
-- **Impact:** Rare, occasional delayed updates on first control
-- **Planned fix:** Refactoring to use Home Assistant's `DataUpdateCoordinator` pattern in v1.1.0
-
-See `ARCHITECTURE_ISSUES.md` for technical details and planned improvements.
 
 ---
 
