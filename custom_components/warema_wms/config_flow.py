@@ -47,11 +47,9 @@ from .const import (
     CONF_DISCOVERY_MODE,
     CONF_NETWORK_KEY,
     CONF_PAN_ID,
-    CONF_SCAN_INTERVAL,
     CONF_SERIAL_PORT,
     DEFAULT_CHANNEL,
     DEFAULT_NEW_NETWORK_CHANNEL,
-    DEFAULT_SCAN_INTERVAL,
     DEFAULT_SERIAL_PORT,
     DISCOVERY_MODE_MANUAL,
     DISCOVERY_MODE_NEW_NETWORK,
@@ -124,7 +122,6 @@ STEP_MANUAL_SCHEMA = vol.Schema(
         vol.Required(CONF_CHANNEL, default=DEFAULT_CHANNEL): int,
         vol.Required(CONF_PAN_ID): str,
         vol.Required(CONF_NETWORK_KEY): str,
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
     }
 )
 
@@ -629,9 +626,6 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._user_input[CONF_CHANNEL] = channel
                     self._user_input[CONF_PAN_ID] = pan_id.upper()
                     self._user_input[CONF_NETWORK_KEY] = network_key.upper()
-                    self._user_input[CONF_SCAN_INTERVAL] = user_input.get(
-                        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-                    )
                     self._discovered_devices = result.get("devices", [])
 
                     if self._discovered_devices:
@@ -820,7 +814,6 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._user_input[CONF_CHANNEL] = params[CONF_CHANNEL]
             self._user_input[CONF_PAN_ID] = params[CONF_PAN_ID]
             self._user_input[CONF_NETWORK_KEY] = params[CONF_NETWORK_KEY]
-            self._user_input[CONF_SCAN_INTERVAL] = DEFAULT_SCAN_INTERVAL
 
             self._wandsender_phase = "connecting"
             self._wandsender_task = self.hass.async_create_task(
@@ -906,7 +899,6 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if self._result_holder.get("snr") is not None:
                 await self._cleanup_serial()
                 # Credentials were already stored in _user_input on first call
-                self._user_input[CONF_SCAN_INTERVAL] = DEFAULT_SCAN_INTERVAL
 
                 # Connect and scan for devices
                 try:
@@ -1097,12 +1089,9 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
     """Handle options for Warema WMS.
 
-    Offers two actions:
-      * rescan   – scan the live WMS network (via the already-connected stick)
-                   for blinds that are not yet in Home Assistant and add the
-                   selected ones. No re-pairing is needed; existing entities
-                   keep their history.
-      * settings – change the position update interval.
+    Scans the live WMS network (via the already-connected stick) for blinds that
+    are not yet in Home Assistant and adds the selected ones. No re-pairing is
+    needed; existing entities keep their history.
     """
 
     def __init__(self) -> None:
@@ -1116,11 +1105,8 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Show the options menu."""
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=["rescan", "settings"],
-        )
+        """Entry point: scan the live network for new devices."""
+        return await self.async_step_rescan()
 
     # ------------------------------------------------------------------
     # Rescan for new devices
@@ -1196,43 +1182,6 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
                 "device_count": str(len(self._discovered_devices)),
             },
         )
-
-    # ------------------------------------------------------------------
-    # Settings (position update interval)
-    # ------------------------------------------------------------------
-
-    async def async_step_settings(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Change the position update interval."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            interval = user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-            if not isinstance(interval, int) or not (10 <= interval <= 3600):
-                errors[CONF_SCAN_INTERVAL] = "invalid_scan_interval"
-            else:
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    data={**self.config_entry.data, CONF_SCAN_INTERVAL: interval},
-                )
-                return self.async_create_entry(
-                    title="", data=dict(self.config_entry.options)
-                )
-
-        current_interval = self.config_entry.data.get(
-            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-        )
-        return self.async_show_form(
-            step_id="settings",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(CONF_SCAN_INTERVAL, default=current_interval): int,
-                }
-            ),
-            errors=errors,
-        )
-
 
 # ---------------------------------------------------------------------------
 # Exceptions

@@ -7,13 +7,11 @@ CONF_SERIAL_PORT = "serial_port"
 CONF_CHANNEL = "channel"
 CONF_PAN_ID = "pan_id"
 CONF_NETWORK_KEY = "network_key"
-CONF_SCAN_INTERVAL = "scan_interval"
 CONF_DEVICES = "devices"
 
 # Default values
 DEFAULT_SERIAL_PORT = "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K28M2-if00-port0"
 DEFAULT_CHANNEL = 17
-DEFAULT_SCAN_INTERVAL = 30  # seconds
 
 # Position polling interval (seconds)
 # Note: Determines how fast remote control moves are detected.

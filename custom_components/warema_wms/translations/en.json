@@ -24,14 +24,12 @@
         "data": {
           "channel": "Channel",
           "pan_id": "PAN ID",
-          "network_key": "Network Key",
-          "scan_interval": "Position Update Interval (seconds)"
+          "network_key": "Network Key"
         },
         "data_description": {
           "channel": "WMS network channel number (1–26)",
           "pan_id": "WMS network PAN ID (4 hexadecimal characters, e.g. D70C)",
-          "network_key": "WMS network encryption key (32 hexadecimal characters)",
-          "scan_interval": "How often to poll blind positions (minimum 10 seconds)"
+          "network_key": "WMS network encryption key (32 hexadecimal characters)"
         }
       },
       "wandsender": {
@@ -78,33 +76,13 @@
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Warema WMS Options",
-        "description": "Choose what you want to do.",
-        "menu_options": {
-          "rescan": "Scan for new devices",
-          "settings": "Change settings"
-        }
-      },
       "select_devices": {
         "title": "Warema WMS – Add Devices",
         "description": "Found {device_count} new controllable blind(s) on the network that are not yet in Home Assistant. Select which ones to add.",
         "data": {
           "selected_devices": "Devices to add"
         }
-      },
-      "settings": {
-        "title": "Warema WMS Options",
-        "data": {
-          "scan_interval": "Position Update Interval (seconds)"
-        },
-        "data_description": {
-          "scan_interval": "How often to poll blind positions (10–3600 seconds)"
-        }
       }
-    },
-    "error": {
-      "invalid_scan_interval": "Scan interval must be between 10 and 3600 seconds."
     },
     "abort": {
       "not_loaded": "The integration is not loaded. Make sure the WMS stick is connected and the integration is running, then try again.",

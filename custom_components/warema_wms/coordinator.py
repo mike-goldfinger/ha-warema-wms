@@ -13,8 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -33,11 +32,6 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# Dispatcher signal names (kept for backward compatibility during migration)
-SIGNAL_POSITION_UPDATE = f"{DOMAIN}_position_update"
-SIGNAL_INIT_COMPLETE = f"{DOMAIN}_init_complete"
-SIGNAL_DEVICES_SCANNED = f"{DOMAIN}_devices_scanned"
 
 
 @dataclass(frozen=True)
@@ -307,14 +301,10 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
             self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, new_data)
 
         elif topic == TOPIC_SCANNED_DEVICES:
+            # Scan results are consumed via self._scanned_devices + the
+            # _scan_event in async_scan_devices(); no dispatcher needed.
             self._scanned_devices = payload.get("devices", [])
             self.hass.loop.call_soon_threadsafe(self._scan_event.set)
-            self.hass.loop.call_soon_threadsafe(
-                async_dispatcher_send,
-                self.hass,
-                SIGNAL_DEVICES_SCANNED,
-                self._scanned_devices,
-            )
 
         elif topic == "wms-vb-rcv-weather-broadcast":
             _LOGGER.debug("WMS weather: %s", payload.get("weather", {}))
