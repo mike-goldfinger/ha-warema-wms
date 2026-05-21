@@ -7,9 +7,16 @@
 
 <p align="center">
   <a href="https://github.com/mike-goldfinger/ha-warema-wms" target="_blank">
-    Control your Warema WMS venetian blinds and shades through Home Assistant
+    Control your Warema WMS venetian blinds and shades through Home Assistant — directly via the Warema WMS USB Stick
   </a>
 </p>
+
+---
+
+> [!IMPORTANT]
+> This integration talks **directly to the Warema WMS radio network using the Warema WMS USB Stick** (FTDI FT232R).
+> It does **not** use and does **not** require the **WMS WebControl pro** gateway or any cloud service.
+> If you control your blinds through a *WMS WebControl pro*, this integration is **not** the right one for you.
 
 ---
 
