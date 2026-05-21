@@ -1,0 +1,114 @@
+{
+  "config": {
+    "step": {
+      "serial_port": {
+        "title": "Warema WMS – Serial Port",
+        "description": "The integration automatically searches for connected Warema WMS USB Sticks (FTDI FT232R devices).\n\nFound devices:\n{devices_list}\n\nIf your device is not listed or no devices were found, you can enter the path manually.\n\nExamples:\n- Linux: `/dev/ttyUSB0` or `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_…`\n- Windows: `COM5`",
+        "data": {
+          "serial_port": "Serial Port"
+        },
+        "data_description": {
+          "serial_port": "Path to the WMS USB Stick serial port (e.g. /dev/ttyUSB0 or COM5)"
+        }
+      },
+      "discovery": {
+        "title": "Warema WMS – Network Discovery",
+        "description": "Choose how to obtain the WMS network parameters (Channel, PAN ID, Network Key):\n\n- **Enter manually** – You already know the parameters\n- **Wandsender pairing** – Put the Wandsender (handheld transmitter) into pairing mode; the wizard captures the parameters automatically\n- **Create new network** – Generate a fresh network and pair your motors to it",
+        "data": {
+          "discovery_mode": "Discovery method"
+        }
+      },
+      "manual": {
+        "title": "Warema WMS – Manual Network Parameters",
+        "description": "Enter the WMS network parameters for your installation.",
+        "data": {
+          "channel": "Channel",
+          "pan_id": "PAN ID",
+          "network_key": "Network Key",
+          "scan_interval": "Position Update Interval (seconds)"
+        },
+        "data_description": {
+          "channel": "WMS network channel number (1–26)",
+          "pan_id": "WMS network PAN ID (4 hexadecimal characters, e.g. D70C)",
+          "network_key": "WMS network encryption key (32 hexadecimal characters)",
+          "scan_interval": "How often to poll blind positions (minimum 10 seconds)"
+        }
+      },
+      "wandsender": {
+        "title": "Warema WMS – Wandsender Pairing",
+        "description": "The stick is now listening for the Wandsender pairing signal.\n\n**Action required:**\n1. Open the battery case of the WMS Wandsender (handheld transmitter)\n2. Press the **learn button** inside the battery case for approximately **5 seconds**\n3. The LEDs turn green – the Wandsender is scanning for devices\n4. When it finds the stick, the network parameters are captured automatically\n\n**Status:** {status}\n\n| Parameter | Value |\n|-----------|-------|\n| Channel | {channel} |\n| PAN ID | {pan_id} |\n| Network Key | {network_key} |\n\nOnce the parameters are captured, click **Submit** to continue."
+      },
+      "new_network": {
+        "title": "Warema WMS – Create New Network",
+        "description": "A new WMS network has been created with the following parameters:\n\n| Parameter | Value |\n|-----------|-------|\n| Channel | {channel} |\n| PAN ID | {pan_id} |\n| Network Key | {network_key} |\n\n**Action required:**\nPut your WMS motor(s) into pairing mode (consult the motor documentation – typically press the motor's pairing/learn button).\n\nThe motor will scan for a network, find the stick, and join automatically.\n\n**Status:** {status}\n\nOnce a motor has joined, click **Submit** to continue."
+      },
+      "usb_confirm": {
+        "title": "Warema WMS Stick Detected",
+        "description": "A Warema WMS USB Stick has been detected:\n\n- **Device**: `{device}`\n- **Manufacturer**: {manufacturer}\n- **Description**: {description}\n- **Serial number**: {serial_number}\n\nDo you want to set it up now?"
+      },
+      "devices": {
+        "title": "Warema WMS – Select Devices",
+        "description": "Found {device_count} controllable blind(s). Select which ones to add to Home Assistant.",
+        "data": {
+          "selected_devices": "Devices to add"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the WMS USB Stick. Check the serial port path and ensure the device is connected.",
+      "invalid_auth": "Invalid network parameters. Check the channel, PAN ID, and network key.",
+      "invalid_serial_port": "Serial port path cannot be empty.",
+      "invalid_pan_id": "PAN ID must be exactly 4 hexadecimal characters (e.g. D70C).",
+      "invalid_key": "Network Key must be exactly 32 hexadecimal characters.",
+      "invalid_channel": "Channel must be a number between 1 and 26.",
+      "wandsender_waiting": "Network parameters not yet received. Keep the Wandsender in pairing mode and click Submit again when the status shows ✅.",
+      "new_network_waiting": "No motor has joined yet. Keep the motor in pairing mode and click Submit again when the status shows ✅.",
+      "unknown": "Unexpected error. Check the Home Assistant logs for details."
+    },
+    "progress": {
+      "wandsender_waiting": "**Step 1: Put Handsender into Pairing Mode**\n\n1. Open the battery cover\n2. Select channel with **(+)** button\n3. Hold **LEARN** button ~5 seconds\n   → LEDs turn green, transmitter scans\n4. Press **(A)** to check each found device\n5. Press **(C)** to skip, or keep pressing **(A)**\n\n⚠️ **Important**: Hold the Handsender **within 50cm** of the WMS stick during pairing!\n\nWaiting for stick identification…",
+      "wandsender_press_stop": "**✅ Stick Found!** \"Waving and Hello!\" (SNR: {snr})\n\n**Step 2: Complete Pairing**\n\n>>> **PRESS STOP BUTTON NOW** on your Handsender <<<\n\nThis sends the network key to the stick.\n\nWaiting for network parameters…",
+      "wandsender_connecting": "**✅ Parameters Captured!**\n\nChannel: **{channel}**\nPAN ID: **{pan_id}**\n\nReconnecting and scanning for blinds…"
+    },
+    "abort": {
+      "already_configured": "Warema WMS is already configured.",
+      "cannot_connect": "Failed to communicate with the WMS USB Stick during pairing. Check the serial port and connection, then start over.",
+      "pairing_timeout": "No Handsender/Wandsender completed pairing in time. Make sure the transmitter is in learn mode and within range, then start over."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Warema WMS Options",
+        "description": "Choose what you want to do.",
+        "menu_options": {
+          "rescan": "Scan for new devices",
+          "settings": "Change settings"
+        }
+      },
+      "select_devices": {
+        "title": "Warema WMS – Add Devices",
+        "description": "Found {device_count} new controllable blind(s) on the network that are not yet in Home Assistant. Select which ones to add.",
+        "data": {
+          "selected_devices": "Devices to add"
+        }
+      },
+      "settings": {
+        "title": "Warema WMS Options",
+        "data": {
+          "scan_interval": "Position Update Interval (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How often to poll blind positions (10–3600 seconds)"
+        }
+      }
+    },
+    "error": {
+      "invalid_scan_interval": "Scan interval must be between 10 and 3600 seconds."
+    },
+    "abort": {
+      "not_loaded": "The integration is not loaded. Make sure the WMS stick is connected and the integration is running, then try again.",
+      "no_new_devices": "No new devices were found on the network. Make sure the new blinds/motors have been added to the WMS network and have completed a reference run (full open/close cycle)."
+    }
+  }
+}
