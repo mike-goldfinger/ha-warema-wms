@@ -20,13 +20,8 @@ All notable changes to this project will be documented in this file.
 - Localized UI strings with English translation
 - Brand assets (logos and icons) for Home Assistant UI
 
-### Known Issues
-- Race conditions in entity registration when using dispatcher-based updates (documented in ARCHITECTURE_ISSUES.md)
-- Entity position updates may arrive before entity registration completes
-- Planned refactoring to DataUpdateCoordinator pattern for v1.1.0
-
 ### Requirements
 - Python 3.9+
 - Home Assistant 2023.1.0+
 - pyserial >= 3.5
-- Warema WMS compatible hardware (venetian blinds/stores)
+- Warema WMS compatible hardware (venetian blinds/shades)

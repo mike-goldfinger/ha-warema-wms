@@ -1,7 +1,7 @@
 """
 Warema WMS custom integration for Home Assistant.
 
-Provides cover entities for Warema WMS venetian blinds/stores
+Provides cover entities for Warema WMS venetian blinds/shades
 controlled via a WMS USB Stick (FTDI FT232R).
 
 Serial port: /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K28M2-if00-port0

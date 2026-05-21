@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/mike-goldfinger/ha-warema-wms" target="_blank">
-    Control your Warema WMS venetian blinds and stores through Home Assistant
+    Control your Warema WMS venetian blinds and shades through Home Assistant
   </a>
 </p>
 
