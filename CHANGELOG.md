@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
   unreachable motor costs ~1 s instead of ~3 s per cycle and the 5 s poll cycle
   stays ahead of the backlog even with one or two flaky motors. Working blinds keep
   updating reliably. Explicit user commands (stop/move follow-ups) keep full retries.
+- Sensors and the moving binary_sensor now appear on first setup, not only after a
+  later rescan. If no device is explicitly ticked in the setup wizard, all discovered
+  blinds are added, so `CONF_DEVICES` is always populated and every platform creates
+  its entities consistently.
 
 ### Changed
 - Tilt controls are now only exposed for actuator types 20 (Actuator UP) and 2E

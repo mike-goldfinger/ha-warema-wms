@@ -996,23 +996,28 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Step 4: Select which discovered blinds to add."""
-        if user_input is not None:
-            selected_snrs = user_input.get("selected_devices", [])
-            selected_devices = [
-                d
-                for d in self._discovered_devices
-                if str(d.get("snr", "")) in selected_snrs
-            ]
-            self._user_input[CONF_DEVICES] = selected_devices
-            return self._create_entry()
-
-        from .const import BLIND_DEVICE_TYPES
-
         blind_devices = [
             d
             for d in self._discovered_devices
             if d.get("device_type", "") in BLIND_DEVICE_TYPES
         ]
+
+        if user_input is not None:
+            selected_snrs = user_input.get("selected_devices", [])
+            if selected_snrs:
+                selected_devices = [
+                    d
+                    for d in self._discovered_devices
+                    if str(d.get("snr", "")) in selected_snrs
+                ]
+            else:
+                # No explicit selection → add all discovered blinds. This keeps
+                # CONF_DEVICES populated so the sensor/binary_sensor platforms
+                # (which have no scan fallback) also create their entities on
+                # first setup, not only after a later rescan.
+                selected_devices = blind_devices
+            self._user_input[CONF_DEVICES] = selected_devices
+            return self._create_entry()
 
         if not blind_devices:
             self._user_input[CONF_DEVICES] = []
@@ -1025,7 +1030,9 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Optional("selected_devices"): cv.multi_select(device_options),
+                vol.Optional(
+                    "selected_devices", default=list(device_options)
+                ): cv.multi_select(device_options),
             }
         )
 
