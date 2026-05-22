@@ -1,7 +1,7 @@
 {
   "domain": "warema_wms",
   "name": "Warema WMS",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "documentation": "https://github.com/mike-goldfinger/ha-warema-wms",
   "issue_tracker": "https://github.com/mike-goldfinger/ha-warema-wms/issues",
   "requirements": ["pyserial>=3.5"],
