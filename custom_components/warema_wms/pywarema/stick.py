@@ -54,6 +54,12 @@ CMD_SETTINGS = {
 DEFAULT_TIMEOUT = 2.0
 DEFAULT_RETRY = -1  # -1 = no retry
 
+# Retry count for background position polls (pos-upd / watch-moving). The full
+# CMD_SETTINGS retry (5) is meant for one-shot user queries; a periodic 5 s poll
+# repeats anyway, so a single retry is enough. This keeps an unreachable motor
+# from burning ~3 s of serial airtime (6 attempts) every cycle.
+POS_POLL_RETRY = 1
+
 
 @dataclass
 class BlindPosition:
@@ -317,15 +323,18 @@ class WmsStick:
             return 1
         return 0
 
-    def blind_get_position(self, blind_id=None) -> None:
+    def blind_get_position(self, blind_id=None, retry: int | None = None) -> None:
         """Request the current position of a blind.
 
         Args:
             blind_id: snr, snr_hex, or name. If None, queries all blinds.
+            retry: Optional override for the message retry count. Background
+                polls pass a low value (POS_POLL_RETRY); explicit user queries
+                leave it None to use the CMD_SETTINGS default.
         """
         if blind_id is None:
             for blind in list(self._blinds.values()):
-                self.blind_get_position(blind.snr_hex)
+                self.blind_get_position(blind.snr_hex, retry=retry)
             return
 
         blind = self._get_blind(blind_id)
@@ -353,6 +362,8 @@ class WmsStick:
                 self._update_blind_pos(blind, new_pos)
 
         msg = WmsMessage("blindGetPos", blind.snr, {})
+        if retry is not None:
+            msg.retry = retry
         msg.on_end = on_complete
         self._enqueue(msg)
         # Trigger queue processing (matching JS behavior)
@@ -654,7 +665,14 @@ class WmsStick:
             return
         if self._pos_upd_interval >= 5.0:
             # Execute immediately (matching JS behavior: doPosUpdInterval())
-            self.blind_get_position()  # poll all blinds
+            for blind in list(self._blinds.values()):
+                # Dedup guard: skip blinds whose blindGetPos is still pending.
+                # Without this, a slow/unreachable motor (whose query takes up to
+                # retries * timeout) lets the queue grow without bound, because a
+                # new poll is enqueued every interval regardless of backlog. This
+                # mirrors _schedule_watch_moving / the JS doWatchMovingBlinds guard.
+                if not self._has_queued_msg("blindGetPos", blind.snr_hex):
+                    self.blind_get_position(blind.snr_hex, retry=POS_POLL_RETRY)
             # Then schedule the next execution
             self._pos_upd_timer = threading.Timer(
                 self._pos_upd_interval, self._schedule_pos_upd
@@ -673,7 +691,7 @@ class WmsStick:
                 if blind.pos_current.moving and not self._has_queued_msg(
                     "blindGetPos", blind.snr_hex
                 ):
-                    self.blind_get_position(blind.snr_hex)
+                    self.blind_get_position(blind.snr_hex, retry=POS_POLL_RETRY)
             # Then schedule the next execution
             self._watch_moving_timer = threading.Timer(
                 self._watch_moving_interval, self._schedule_watch_moving

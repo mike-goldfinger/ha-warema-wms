@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-05-22
+
+### Fixed
+- Position polling no longer lets the serial queue grow without bound: background
+  position queries (pos-update / watch-moving) now skip motors that already have a
+  pending `blindGetPos` request (dedup guard).
+- Reduced retry count for background position polls (new `POS_POLL_RETRY`), so an
+  unreachable motor costs ~1 s instead of ~3 s per cycle and the 5 s poll cycle
+  stays ahead of the backlog even with one or two flaky motors. Working blinds keep
+  updating reliably. Explicit user commands (stop/move follow-ups) keep full retries.
+
 ## [1.0.0] - 2026-05-21
 
 ### Added
