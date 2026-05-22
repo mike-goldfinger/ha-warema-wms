@@ -1,6 +1,6 @@
 # Warema WMS Home Assistant Integration
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/release/mike-goldfinger/ha-warema-wms.svg?style=flat-square&label=Release)](https://github.com/mike-goldfinger/ha-warema-wms/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Maintenance](https://img.shields.io/badge/Maintenance-Active-green.svg)](https://github.com/mike-goldfinger/ha-warema-wms)
@@ -45,9 +45,9 @@
 
 ## 🚀 Installation
 
-### Via HACS — Custom Repository (current method)
+### Via HACS — Custom Repository
 
-Until this integration is accepted into the HACS default store, add it as a **custom repository**:
+This integration is **not** in the HACS default store. Add it as a **custom repository**:
 
 1. Open **HACS** in Home Assistant
 2. Click the **⋮** menu (top right) → **Custom repositories**
@@ -58,16 +58,6 @@ Until this integration is accepted into the HACS default store, add it as a **cu
 5. Search for **Warema WMS** in HACS and click **Download**
 6. Restart Home Assistant
 7. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
-
-### Via HACS — Default Store (once accepted)
-
-Once the integration is part of the HACS default store:
-
-1. Open **HACS** in Home Assistant
-2. Go to **Integrations** and search for **Warema WMS**
-3. Click **Download**
-4. Restart Home Assistant
-5. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
 
 ### Manual Installation
 
