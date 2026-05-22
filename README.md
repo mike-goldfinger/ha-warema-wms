@@ -124,10 +124,12 @@ Each blind appears as a `cover` entity with:
 | Control | Range | Notes |
 |---------|-------|-------|
 | **Position** | 0–100% | 0 = closed, 100 = open |
-| **Tilt** | 0–100% | 0 = fully closed, 50 = horizontal, 100 = open |
+| **Tilt** | 0–100% | 0 = fully closed, 50 = horizontal, 100 = open. *Only for slatted blinds — see note below.* |
 | **Open** | — | Move to fully open |
 | **Close** | — | Move to fully closed |
 | **Stop** | — | Stop current movement |
+
+> **Tilt availability:** Tilt (slat angle) is only exposed for **Actuator UP (type 20)** and **Actuator 230V UP (type 2E)**, which drive slatted blinds (Raffstoren). Plug receivers (21) and radio motors (25) typically drive awnings/roller shutters without slats, so no tilt control is shown for them.
 
 ### Sensor Entities
 - **Motor SNR** — Serial number (6-digit hex)

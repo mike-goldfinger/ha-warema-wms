@@ -50,3 +50,8 @@ DEVICE_TYPE_STRINGS = {
 
 # Blind device types (controllable covers)
 BLIND_DEVICE_TYPES = {"20", "21", "25", "2E"}
+
+# Device types that support slat tilt (in-wall actuators used for Raffstoren).
+# Plug receiver (21) and radio motor (25) drive awnings/roller shutters
+# without slats, so tilt is not exposed for them.
+TILT_DEVICE_TYPES = {"20", "2E"}

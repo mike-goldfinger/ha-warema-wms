@@ -13,6 +13,12 @@ All notable changes to this project will be documented in this file.
   stays ahead of the backlog even with one or two flaky motors. Working blinds keep
   updating reliably. Explicit user commands (stop/move follow-ups) keep full retries.
 
+### Changed
+- Tilt controls are now only exposed for actuator types 20 (Actuator UP) and 2E
+  (Actuator 230V UP), which drive slatted blinds (Raffstoren). Awnings and roller
+  shutters on plug receivers (21) or radio motors (25) no longer show a meaningless
+  tilt control.
+
 ## [1.0.0] - 2026-05-21
 
 ### Added

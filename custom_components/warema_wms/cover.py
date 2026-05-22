@@ -41,6 +41,7 @@ from .const import (
     BLIND_DEVICE_TYPES,
     CONF_DEVICES,
     DOMAIN,
+    TILT_DEVICE_TYPES,
 )
 from .coordinator import WaremaCoordinator
 
@@ -157,15 +158,6 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
 
     _attr_has_entity_name = True
     _attr_device_class = CoverDeviceClass.BLIND
-    _attr_supported_features = (
-        CoverEntityFeature.OPEN
-        | CoverEntityFeature.CLOSE
-        | CoverEntityFeature.STOP
-        | CoverEntityFeature.SET_POSITION
-        | CoverEntityFeature.OPEN_TILT
-        | CoverEntityFeature.CLOSE_TILT
-        | CoverEntityFeature.SET_TILT_POSITION
-    )
 
     def __init__(
         self,
@@ -184,6 +176,25 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         self._device_type = device_type
         self._device_type_str = device_type_str
         self._entry_id = entry_id
+
+        # Tilt (slat angle) only makes sense for slatted blinds. The device
+        # type reflects the actuator hardware: in-wall actuators (20/2E) drive
+        # Raffstoren with slats, while plug receivers / radio motors (21/25)
+        # drive awnings/roller shutters without slats. Expose tilt accordingly.
+        self._supports_tilt = device_type in TILT_DEVICE_TYPES
+        features = (
+            CoverEntityFeature.OPEN
+            | CoverEntityFeature.CLOSE
+            | CoverEntityFeature.STOP
+            | CoverEntityFeature.SET_POSITION
+        )
+        if self._supports_tilt:
+            features |= (
+                CoverEntityFeature.OPEN_TILT
+                | CoverEntityFeature.CLOSE_TILT
+                | CoverEntityFeature.SET_TILT_POSITION
+            )
+        self._attr_supported_features = features
 
         # For tracking movement direction during commands (not persisted across updates)
         self._command_moving = False
@@ -222,6 +233,8 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
     @property
     def current_cover_tilt_position(self) -> int | None:
         """Return current tilt position in HA convention (0-100)."""
+        if not self._supports_tilt:
+            return None
         state = self._get_blind_state()
         if not state or state.position < 0:
             return None
