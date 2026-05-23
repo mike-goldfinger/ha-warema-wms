@@ -3,7 +3,7 @@
   "name": "Warema WMS",
   "codeowners": ["@mike-goldfinger"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["usb"],
   "documentation": "https://github.com/mike-goldfinger/ha-warema-wms",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/mike-goldfinger/ha-warema-wms/issues",
