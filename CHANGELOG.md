@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.3] - 2026-05-23
+
+### Fixed
+- Declared the `usb` integration as a dependency so USB auto-discovery of the
+  WMS stick works reliably and the manifest passes Home Assistant's hassfest
+  validation.
+- Removed an invalid `homeassistant` key from `manifest.json` (the minimum HA
+  version belongs in `hacs.json`) and reordered the manifest keys to the
+  hassfest convention.
+
+### Added
+- Continuous integration: HACS Action and hassfest validation now run on every
+  push, plus a daily scheduled check.
+
 ## [1.0.2] - 2026-05-22
 
 ### Fixed

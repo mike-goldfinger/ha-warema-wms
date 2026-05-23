@@ -59,6 +59,17 @@ This integration is **not** in the HACS default store. Add it as a **custom repo
 6. Restart Home Assistant
 7. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
 
+### Via HACS — Default Store (once accepted)
+
+> Submission to the HACS default store is pending. Once accepted, no custom
+> repository is needed:
+
+1. Open **HACS** in Home Assistant
+2. Search for **Warema WMS**
+3. Click **Download**
+4. Restart Home Assistant
+5. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
+
 ### Manual Installation
 
 1. Copy `custom_components/warema_wms/` to your HA `custom_components/` directory
