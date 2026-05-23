@@ -1,19 +1,18 @@
 {
   "domain": "warema_wms",
   "name": "Warema WMS",
-  "version": "1.0.2",
-  "documentation": "https://github.com/mike-goldfinger/ha-warema-wms",
-  "issue_tracker": "https://github.com/mike-goldfinger/ha-warema-wms/issues",
-  "requirements": ["pyserial>=3.5"],
-  "dependencies": [],
   "codeowners": ["@mike-goldfinger"],
   "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/mike-goldfinger/ha-warema-wms",
   "iot_class": "local_polling",
-  "homeassistant": "2023.1.0",
+  "issue_tracker": "https://github.com/mike-goldfinger/ha-warema-wms/issues",
+  "requirements": ["pyserial>=3.5"],
   "usb": [
     {
       "vid": "0403",
       "pid": "6001"
     }
-  ]
+  ],
+  "version": "1.0.2"
 }
