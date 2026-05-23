@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
   hassfest convention.
 
 ### Added
+- Bundled brand icons (`icon.png`, `dark_icon.png`, plus `@2x` hDPI variants) in
+  `custom_components/warema_wms/brand/`. From Home Assistant 2026.3 these are
+  served through the local Brands Proxy API, so the integration shows its own
+  icon in the UI without a separate brands-repository submission.
 - Continuous integration: HACS Action and hassfest validation now run on every
   push, plus a daily scheduled check.
 

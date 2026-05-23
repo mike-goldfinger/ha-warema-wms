@@ -1,0 +1,36 @@
+<svg width="100%" viewBox="90 90 500 500" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Warema WMS Home Assistant integration icon - light mode</title>
+  <desc>A square icon showing a window with venetian blind slats and radio waves, representing the Warema WMS smart home integration. Light mode variant.</desc>
+
+  <defs>
+    <linearGradient id="sunGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FF6B2B"/>
+      <stop offset="100%" stop-color="#FFB347"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="90" y="90" width="500" height="500" rx="80" fill="#F8FAFC"/>
+
+  <rect x="150" y="150" width="380" height="380" rx="20" fill="#EAF1F8"/>
+  <rect x="150" y="150" width="380" height="30" rx="10" fill="#CBD5E1"/>
+  <rect x="150" y="170" width="380" height="10" fill="#CBD5E1"/>
+
+  <rect x="165" y="200" width="350" height="14" rx="4" fill="#D6405A" opacity="0.92"/>
+  <rect x="165" y="225" width="350" height="14" rx="4" fill="#D6405A" opacity="0.84"/>
+  <rect x="165" y="250" width="350" height="14" rx="4" fill="#D6405A" opacity="0.76"/>
+  <rect x="165" y="275" width="350" height="14" rx="4" fill="#D6405A" opacity="0.68"/>
+  <rect x="165" y="300" width="350" height="14" rx="4" fill="#D6405A" opacity="0.60"/>
+  <rect x="165" y="325" width="350" height="14" rx="4" fill="#D6405A" opacity="0.50"/>
+  <rect x="165" y="350" width="350" height="14" rx="4" fill="#D6405A" opacity="0.40"/>
+
+  <circle cx="440" cy="430" r="90" fill="#F8FAFC"/>
+  <circle cx="440" cy="430" r="75" fill="url(#sunGrad)" opacity="0.22"/>
+
+  <path d="M400 430 Q415 415 430 430 Q445 445 460 430 Q475 415 480 430" fill="none" stroke="#FF6B2B" stroke-width="8" stroke-linecap="round"/>
+  <path d="M388 430 Q403 408 418 430 Q433 452 448 430 Q463 408 478 430 Q493 452 498 430" fill="none" stroke="#FF6B2B" stroke-width="5" stroke-linecap="round" opacity="0.68"/>
+  <path d="M378 430 Q398 400 413 430 Q428 460 443 430 Q458 400 473 430 Q488 460 508 430" fill="none" stroke="#FF6B2B" stroke-width="3" stroke-linecap="round" opacity="0.42"/>
+
+  <circle cx="440" cy="430" r="10" fill="#FF6B2B"/>
+
+  <rect x="327" y="148" width="26" height="384" rx="4" fill="#94A3B8"/>
+</svg>
