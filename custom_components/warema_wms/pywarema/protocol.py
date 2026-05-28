@@ -21,6 +21,8 @@ Angle encoding:
 
 import logging
 import math
+from dataclasses import dataclass
+from typing import Optional, Union
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -101,6 +103,83 @@ def angle_percent_to_hex(ang_percent: int) -> str:
 def angle_hex_to_percent(ang_hex: str) -> int:
     """Convert 2-char hex angle to percentage (-100 to +100)."""
     return round((int(ang_hex, 16) - 127) / WMS_ANGLE * 100)
+
+
+# ---------------------------------------------------------------------------
+# Motor firmware parameters (Block 38 - persistent device-side settings)
+# ---------------------------------------------------------------------------
+#
+# These are the values WMS Studio Pro shows under "Position bei manueller
+# Bedienung" etc. and that persist across power cycles - they also apply when
+# the handheld remote operates the motor. Encodings are verified against a
+# live WMS Studio Pro trace (see re/PROTOCOL.md):
+#
+#   manualOperation.settingDown.position  block 38 addr 301: byte = pct * 2
+#   manualOperation.settingDown.slatAngle block 38 addr 302: byte = deg + 127
+#   manualOperation.dwellTimeManualScene  block 38 addr 305: byte = minutes (unit TBC)
+#   scene.scene0.position                 block 38 addr 307: byte = pct * 2
+#   scene.scene0.slatAngle                block 38 addr 308: byte = deg + 127
+#   common.isAbsent                       block 38 addr 1:   byte = 0/1
+#
+# 0xFF in any byte is the sentinel for "unset / not configured" - we map it
+# to None.
+
+MOTOR_PARAM_BLOCK = 38
+
+# Block addresses (from the decrypted PList for ExternalVenetianBlind +
+# wms-plug-receiver-v3, see re/decompiled/Product.ExternalVenetianBlind/...).
+ADDR_COMMON_IS_ABSENT = 1
+ADDR_MANUAL_POSITION = 301
+ADDR_MANUAL_SLAT_ANGLE = 302
+ADDR_MANUAL_DUMMY = 303
+ADDR_MANUAL_DWELL_TIME = 305
+ADDR_COMFORT_POSITION = 307  # scene.scene0.position
+ADDR_COMFORT_SLAT_ANGLE = 308  # scene.scene0.slatAngle
+
+
+def manual_position_to_byte(pct: int) -> int:
+    """Encode position percentage (0..100) -> byte (0..200)."""
+    return max(0, min(200, pct * 2))
+
+
+def manual_position_from_byte(byte: int) -> Optional[int]:
+    """Decode byte (0..200) -> percentage, or None for the 0xFF sentinel."""
+    if byte == 0xFF:
+        return None
+    return byte // 2
+
+
+def slat_angle_to_byte(degrees: int) -> int:
+    """Encode slat angle (0..75 deg) -> byte (127..202)."""
+    return max(127, min(202, degrees + 127))
+
+
+def slat_angle_from_byte(byte: int) -> Optional[int]:
+    """Decode byte (127..202) -> degrees, or None for the 0xFF sentinel."""
+    if byte == 0xFF:
+        return None
+    return byte - 127
+
+
+@dataclass
+class MotorParameters:
+    """Firmware parameters of a Warema motor/actuator (Block 38).
+
+    None for any field means either "not set on the device" (when read) or
+    "leave unchanged" (when written).
+    """
+
+    # manualOperation.settingDown
+    manual_position: Optional[int] = None  # %, 0..100
+    manual_angle: Optional[int] = None  # degrees, 0..75
+    manual_dwell_time: Optional[int] = None  # raw, 0..254 (unit TBC: minutes?)
+
+    # scene.scene0 = "Komfortposition" in the WMS Studio Pro UI
+    comfort_position: Optional[int] = None  # %, 0..100
+    comfort_angle: Optional[int] = None  # degrees, 0..75
+
+    # common.isAbsent = "Status Abwesend" toggle
+    is_absent: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +273,53 @@ def encode_cmd(cmd: str, snr, params: dict) -> dict:
         result["expect"]["msg_type"] = "ackMsg"
         result["expect"]["snr"] = snr_hex
         result["cmd"] = "{R06" + snr_hex + "7050}"
+
+    elif cmd == "mb8Read":
+        # Generic MB8 block read - reads `size` bytes from <block, addr>.
+        # Wire format: {R06<SNR>8010<BLOCK_hex2><ADDR_LE_hex4><SIZE_hex2>}
+        block = int(params.get("block", 0))
+        addr = int(params.get("addr", 0))
+        size = int(params.get("size", 1))
+        result["expect"]["msg_type"] = "mb8ReadResponse"
+        result["expect"]["snr"] = snr_hex
+        result["cmd"] = (
+            "{R06"
+            + snr_hex
+            + "8010"
+            + format(block & 0xFF, "02X")
+            + format(addr & 0xFF, "02X")
+            + format((addr >> 8) & 0xFF, "02X")
+            + format(size & 0xFF, "02X")
+            + "}"
+        )
+
+    elif cmd == "mb8Write":
+        # Generic MB8 block write - writes `data` bytes to <block, addr>.
+        # Wire format: {R06<SNR>8020<BLOCK_hex2><ADDR_LE_hex4><DATA>}
+        # No length prefix - the data length is implicit from the frame size.
+        block = int(params.get("block", 0))
+        addr = int(params.get("addr", 0))
+        data = params.get("data", b"")
+        if isinstance(data, int):
+            data = bytes([data])
+        elif isinstance(data, list):
+            data = bytes(data)
+        elif isinstance(data, str):
+            data = bytes.fromhex(data)
+        elif not isinstance(data, (bytes, bytearray)):
+            raise TypeError(f"mb8Write data must be bytes/int/list/hex-str, got {type(data)}")
+        result["expect"]["msg_type"] = "mb8WriteResponse"
+        result["expect"]["snr"] = snr_hex
+        result["cmd"] = (
+            "{R06"
+            + snr_hex
+            + "8020"
+            + format(block & 0xFF, "02X")
+            + format(addr & 0xFF, "02X")
+            + format((addr >> 8) & 0xFF, "02X")
+            + bytes(data).hex().upper()
+            + "}"
+        )
 
     else:
         _LOGGER.error("encode_cmd: Unknown command '%s'", cmd)
@@ -296,6 +422,25 @@ def decode_frame(raw: str) -> dict:
             elif param_type == "26000046":
                 msg_type = "clock"
                 params["unknown"] = payload[20:]
+            else:
+                # Generic MB8 read response.
+                # Wire format: <block_hex2><addr_LE_hex4><size_hex2><data_hex>
+                # See re/PROTOCOL.md - used for arbitrary block/addr reads on
+                # top of the legacy hardcoded position/clock/auto cases above.
+                msg_type = "mb8ReadResponse"
+                params["block"] = int(payload[0:2], 16)
+                params["addr"] = int(payload[2:4], 16) | (int(payload[4:6], 16) << 8)
+                size = int(payload[6:8], 16)
+                params["size"] = size
+                params["data"] = bytes.fromhex(payload[8 : 8 + size * 2])
+
+        elif rcv_type == "8021":
+            # MB8 write response - echoes block, addr and the written data.
+            # Format: <block_hex2><addr_LE_hex4><data_hex>  (no length prefix)
+            msg_type = "mb8WriteResponse"
+            params["block"] = int(payload[0:2], 16)
+            params["addr"] = int(payload[2:4], 16) | (int(payload[4:6], 16) << 8)
+            params["data"] = bytes.fromhex(payload[6:])
 
         elif rcv_type == "7071":
             # Move to pos response

@@ -3,7 +3,7 @@
     "step": {
       "serial_port": {
         "title": "Warema WMS – Serial Port",
-        "description": "Enter the path to the WMS USB Stick serial port.\n\nExamples:\n- Linux: `/dev/ttyUSB0` or `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_…`\n- Windows: `COM5`",
+        "description": "The integration automatically searches for connected Warema WMS USB Sticks (FTDI FT232R devices).\n\nFound devices:\n{devices_list}\n\nIf your device is not listed or no devices were found, you can enter the path manually.\n\nExamples:\n- Linux: `/dev/ttyUSB0` or `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_…`\n- Windows: `COM5`",
         "data": {
           "serial_port": "Serial Port"
         },
@@ -76,17 +76,58 @@
   },
   "options": {
     "step": {
+      "init": {
+        "title": "Warema WMS – Options",
+        "description": "Choose what you want to do.",
+        "menu_options": {
+          "rescan": "Scan for new devices",
+          "configure_firmware": "Configure motor firmware parameters"
+        }
+      },
       "select_devices": {
         "title": "Warema WMS – Add Devices",
         "description": "Found {device_count} new controllable blind(s) on the network that are not yet in Home Assistant. Select which ones to add.",
         "data": {
           "selected_devices": "Devices to add"
         }
+      },
+      "configure_firmware": {
+        "title": "Warema WMS – Configure Motor Parameters",
+        "description": "These are persistent on-device settings stored in the motor itself. They survive power cycles and also apply when you operate the motor via the handheld remote. Pick the device whose firmware parameters you want to read and change.\n\n{device_count} configurable device(s) available.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "firmware_params": {
+        "title": "Warema WMS – Motor Firmware Parameters",
+        "description": "Current values read from the motor:\n\n| Parameter | Current |\n|-----------|---------|\n| Position bei manueller Bedienung | {current_manual_position} |\n| Winkel bei manueller Bedienung | {current_manual_angle} |\n| Haltezeit | {current_manual_dwell_time} |\n| Komfortposition | {current_comfort_position} |\n| Komfortposition Winkel | {current_comfort_angle} |\n| Status Abwesend | {current_is_absent} |\n\nChange any field below; unchanged fields are left as-is on the device.",
+        "data": {
+          "manual_position": "Position bei manueller Bedienung (%)",
+          "manual_angle": "Winkel bei manueller Bedienung (°)",
+          "manual_dwell_time": "Haltezeit (raw)",
+          "comfort_position": "Komfortposition (%)",
+          "comfort_angle": "Komfortposition Winkel (°)",
+          "is_absent": "Status Abwesend"
+        },
+        "data_description": {
+          "manual_position": "0–100. How far down the motor goes when you press DOWN on the remote.",
+          "manual_angle": "0–75. Slat tilt angle reached after the position is set.",
+          "manual_dwell_time": "0–254. Currently uninterpreted raw byte (likely minutes – TBC).",
+          "comfort_position": "0–100. Position reached when the comfort scene (scene0) is invoked.",
+          "comfort_angle": "0–75. Slat angle for the comfort scene.",
+          "is_absent": "Activates the 'absent' state on the motor (Statusabwesend)."
+        }
       }
+    },
+    "error": {
+      "write_failed": "Writing parameters to the motor failed. The 2-phase transfer-block protocol could not be completed - the motor may be unreachable, asleep, or in use. Wake it via the handheld remote and try again. Check the Home Assistant log for per-step details."
     },
     "abort": {
       "not_loaded": "The integration is not loaded. Make sure the WMS stick is connected and the integration is running, then try again.",
-      "no_new_devices": "No new devices were found on the network. Make sure the new blinds/motors have been added to the WMS network and have completed a reference run (full open/close cycle)."
+      "no_new_devices": "No new devices were found on the network. Make sure the new blinds/motors have been added to the WMS network and have completed a reference run (full open/close cycle).",
+      "no_configurable_devices": "No devices in this integration support firmware parameter configuration. Only Actuator UP (type 20), Plug Receiver (type 21) and Actuator 230V UP (type 2E) are supported.",
+      "invalid_device": "Selected device not recognized.",
+      "cannot_read_params": "Failed to read parameters from the motor. The device may be unreachable. Wake the motor (e.g. with the handheld remote) and try again."
     }
   }
 }
