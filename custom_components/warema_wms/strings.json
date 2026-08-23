@@ -81,9 +81,14 @@
         "description": "Choose what you want to do.",
         "menu_options": {
           "rescan": "Scan for new devices",
+          "pair_device": "Pair a Wandsender-bound device (e.g. slat-roof light)",
           "configure_firmware": "Configure motor firmware parameters",
           "device_settings": "Display: position direction (awnings)"
         }
+      },
+      "pair_device": {
+        "title": "Warema WMS – Pair a Wandsender-Bound Device",
+        "description": "Use this when a device does not show up under \"Scan for new devices\" even though it works fine from its handheld Wandsender (remote control) - for example the integrated lighting on a Lamaxa slat roof. Such devices are sometimes only ever paired to the Wandsender and never join the WMS network on their own, so the normal scan never sees them.\n\nThis captures the device's serial number by watching it announce itself while you operate it from the Wandsender. It does **not** change your network's PAN ID or key - only the new device is added."
       },
       "device_settings": {
         "title": "Warema WMS – Display: position direction",
@@ -204,7 +209,10 @@
       }
     },
     "progress": {
-      "loading": "Loading parameters from {source_name} … (this can take a few seconds)"
+      "loading": "Loading parameters from {source_name} … (this can take a few seconds)",
+      "pair_device_waiting": "**Step 1: Identify the Wandsender**\n\n1. On the Wandsender, hold the **LEARN** button ~5 seconds until the LEDs turn green and it starts scanning\n2. It will find this stick automatically\n\n⚠️ **Important**: Hold the Wandsender **within 50cm** of the WMS stick.\n\nWaiting for the Wandsender to identify the stick…",
+      "pair_device_scanning": "**✅ Wandsender Found!** (SNR: {snr})\n\n**Step 2: Trigger the Device**\n\nOn the Wandsender, operate the button/channel for the device you want to add (e.g. the light button for a slat-roof's lighting).\n\nWaiting for the device to announce itself…",
+      "pair_device_reconnecting": "**✅ Device Captured!** (SNR: {device_snr})\n\nReconnecting and scanning the network for it…"
     },
     "error": {
       "write_failed": "Writing parameters to the motor failed. The motor may be unreachable, asleep, or in use. Wake it via the handheld remote and try again. Check the Home Assistant log for per-step details.",
@@ -215,7 +223,10 @@
       "no_new_devices": "No new devices were found on the network. Make sure the new blinds/motors have been added to the WMS network and have completed a reference run (full open/close cycle).",
       "no_configurable_devices": "No devices in this integration support firmware parameter configuration. Only Actuator UP (type 20), Plug Receiver (type 21) and Actuator 230V UP (type 2E) are supported.",
       "invalid_device": "Selected device not recognized.",
-      "cannot_read_params": "Failed to read parameters from the motor. The device may be unreachable. Wake the motor (e.g. with the handheld remote) and try again."
+      "cannot_read_params": "Failed to read parameters from the motor. The device may be unreachable. Wake the motor (e.g. with the handheld remote) and try again.",
+      "cannot_connect": "Failed to communicate with the WMS USB Stick while pairing. Check the serial port and connection, then try again.",
+      "pairing_timeout": "No Wandsender/device completed pairing in time. Make sure the Wandsender is in learn mode and within range, then try again.",
+      "device_not_in_scan": "The device announced itself (its serial number was captured) but did not answer the follow-up network scan - it may have gone back to sleep. Check the Home Assistant log for its serial number, then try \"Scan for new devices\" once it is active again."
     }
   },
   "entity": {

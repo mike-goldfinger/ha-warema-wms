@@ -285,6 +285,115 @@ def _listen_for_network_params(
                     pass
 
 
+def _listen_for_paired_device(
+    ser: serial.Serial,
+    pan_id: str,
+    stop_event: threading.Event,
+    result_holder: dict,
+    stick_found_event: threading.Event,
+    device_found_event: threading.Event,
+) -> None:
+    """Background thread: capture a device that only answers via its Wandsender.
+
+    Some actuators (observed on Warema Lamaxa slat-roof lighting, see
+    https://github.com/mike-goldfinger/ha-warema-wms/issues/8) never joined the
+    WMS network on their own and so never answer a plain broadcast scanRequest -
+    they were only ever paired to a handheld Wandsender. Such a device can be
+    revealed by talking to the Wandsender itself instead of the device
+    directly; this listener reproduces that path for a single extra device
+    without touching the existing network's PAN ID or key.
+
+    Unlike ``_listen_for_network_params`` (used for initial setup), this
+    listener answers scanRequest with our REAL pan_id, not a probe ID: we are
+    not trying to look like an unknown stick to capture a fresh network key -
+    we already have the network's key and only need the Wandsender to nudge its
+    paired device into announcing itself with a joinNetworkRequest, which tells
+    us that device's serial number.
+
+    Real-time state is exposed the same way ``_listen_for_network_params`` does:
+
+      * ``result_holder['phase']`` - "scanning" | "stick_found" | "device_found"
+      * ``result_holder['snr']``   - SNR of the Wandsender that scanned us
+      * ``result_holder['device_snr']`` / ``['device_snr_hex']`` - captured device
+      * ``stick_found_event``      - set when the Wandsender identifies our stick
+      * ``device_found_event``     - set when the paired device announces itself
+    """
+    from .pywarema.protocol import decode_frame
+
+    recv_buffer = ""
+
+    while not stop_event.is_set():
+        try:
+            data = ser.read(256)
+        except serial.SerialException as exc:
+            _LOGGER.warning("PAIR_DEVICE listener serial error: %s", exc)
+            result_holder["error"] = str(exc)
+            stick_found_event.set()
+            device_found_event.set()
+            return
+
+        if data:
+            recv_buffer += data.decode("ascii", errors="replace")
+
+        while "}" in recv_buffer:
+            idx = recv_buffer.index("}")
+            frame = recv_buffer[: idx + 1]
+            recv_buffer = recv_buffer[idx + 1 :]
+
+            if not frame.startswith("{"):
+                continue
+
+            try:
+                msg = decode_frame(frame)
+            except Exception:  # pylint: disable=broad-except
+                continue
+
+            msg_type = msg.get("msg_type", "")
+            params = msg.get("params", {})
+            snr = msg.get("snr", "000000")
+
+            if msg_type == "joinNetworkRequest":
+                # The paired device (not the Wandsender) is announcing itself.
+                result_holder["device_snr"] = msg.get("snr_num")
+                result_holder["device_snr_hex"] = snr
+                result_holder["phase"] = "device_found"
+                try:
+                    ser.write(b"{a}")
+                except Exception:  # pylint: disable=broad-except
+                    pass
+                device_found_event.set()
+                return
+
+            elif msg_type == "scanRequest":
+                # Answer with our real PAN ID: the Wandsender already knows this
+                # stick, so it won't offer to (re)send a network key - we don't
+                # want one. We only need it to keep talking to its paired device.
+                result_holder["snr"] = snr
+                result_holder.setdefault("phase", "scanning")
+                try:
+                    resp = ("{R01" + snr + "7021" + pan_id + "02}").encode("ascii")
+                    ser.write(resp)
+                except Exception:  # pylint: disable=broad-except
+                    pass
+
+            elif msg_type == "waveRequest":
+                result_holder["snr"] = snr
+                result_holder["phase"] = "stick_found"
+                stick_found_event.set()
+                try:
+                    ser.write(b"{a}")
+                except Exception:  # pylint: disable=broad-except
+                    pass
+
+            elif msg_type == "switchChannelRequest":
+                ch = params.get("channel", DEFAULT_CHANNEL)
+                pid = params.get("pan_id", pan_id)
+                try:
+                    ser.write(("{M%" + str(ch) + pid + "}").encode("ascii"))
+                except Exception:  # pylint: disable=broad-except
+                    pass
+
+
 def _listen_for_motor_join(
     ser: serial.Serial,
     pan_id: str,
@@ -1158,6 +1267,16 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
         self._fw_load_task = None  # asyncio task of the parameter read
         self._fw_ref_failed = False  # source unreadable -> warn in the form
         self._ds_selected_snr: int | None = None  # device_settings: chosen device
+        # Used by pair_device (Wandsender-bound device capture)
+        self._serial_obj: serial.Serial | None = None
+        self._stop_event: threading.Event | None = None
+        self._listen_thread: threading.Thread | None = None
+        self._result_holder: dict = {}
+        self._stick_found_event: threading.Event | None = None
+        self._device_found_event: threading.Event | None = None
+        self._pair_phase: str | None = None
+        self._pair_abort_reason: str | None = None
+        self._pair_task: asyncio.Task | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -1165,7 +1284,12 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
         """Entry point: show a menu choosing rescan vs. firmware config."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["rescan", "configure_firmware", "device_settings"],
+            menu_options=[
+                "rescan",
+                "pair_device",
+                "configure_firmware",
+                "device_settings",
+            ],
         )
 
     # ------------------------------------------------------------------
@@ -1203,6 +1327,261 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
             return self.async_abort(reason="no_new_devices")
 
         return await self.async_step_select_devices()
+
+    # ------------------------------------------------------------------
+    # Pair a device that only answers via its Wandsender
+    # ------------------------------------------------------------------
+    #
+    # Some actuators - observed on a Warema Lamaxa slat-roof's integrated
+    # lighting, see https://github.com/mike-goldfinger/ha-warema-wms/issues/8 -
+    # never joined the WMS network on their own. They are only ever paired to
+    # a handheld Wandsender and so never answer the broadcast scanRequest that
+    # "rescan" relies on, even though the Wandsender itself controls them fine.
+    # Such a device can be revealed by talking to the Wandsender instead of
+    # the device directly; this flow reproduces that by putting the
+    # Wandsender in pairing mode against our stick (using the network's real
+    # PAN ID, so no re-keying happens) and waiting for the paired device to
+    # announce itself.
+
+    async def async_step_pair_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Wrapper that logs any exception raised while pairing.
+
+        Mirrors the config-flow wandsender step: HA drops a flow whose step
+        raises, replacing it with the generic "Invalid flow specified", so the
+        real cause is logged here via the integration's own logger first.
+        """
+        try:
+            return await self._pair_device_impl(user_input)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("PAIR_DEVICE step crashed (phase=%s)", self._pair_phase)
+            raise
+
+    async def _pair_device_impl(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Listen for a Wandsender-paired device using a live progress dialog.
+
+        Phases (see ``_listen_for_paired_device`` for the wire-level details):
+
+          * "waiting"      - wait for the Wandsender to identify our stick
+                              (waveRequest).
+          * "scanning"     - stick identified; ask the user to trigger the
+                              paired device from the Wandsender so it
+                              announces itself (joinNetworkRequest).
+          * "rescanning"   - device SNR captured; reconnect the coordinator
+                              and scan so we get its device_type/product_type.
+
+        Home Assistant re-invokes this step whenever the current
+        ``progress_task`` finishes, so each call advances to the next phase.
+        """
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if coordinator is None:
+            return self.async_abort(reason="not_loaded")
+
+        if self._pair_phase is None:
+            # First entry: release the coordinator's serial port so we can
+            # open it ourselves, then start the listener with the network's
+            # real PAN ID (we are not capturing a new key, just nudging an
+            # already-known Wandsender into revealing its paired device).
+            port = self.config_entry.data[CONF_SERIAL_PORT]
+            channel = self.config_entry.data[CONF_CHANNEL]
+            pan_id = self.config_entry.data[CONF_PAN_ID]
+            key = self.config_entry.data[CONF_NETWORK_KEY]
+
+            await coordinator.async_disconnect()
+
+            try:
+                self._serial_obj = await self.hass.async_add_executor_job(
+                    _init_stick_probe, port, channel, pan_id, key
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                _LOGGER.error(
+                    "Failed to open serial port for pair_device: %s", exc
+                )
+                await coordinator.async_connect()
+                return self.async_abort(reason="cannot_connect")
+
+            self._result_holder = {}
+            self._stop_event = threading.Event()
+            self._stick_found_event = threading.Event()
+            self._device_found_event = threading.Event()
+            self._listen_thread = threading.Thread(
+                target=_listen_for_paired_device,
+                args=(
+                    self._serial_obj,
+                    pan_id,
+                    self._stop_event,
+                    self._result_holder,
+                    self._stick_found_event,
+                    self._device_found_event,
+                ),
+                daemon=True,
+                name="wms-pair-device-listener",
+            )
+            self._listen_thread.start()
+
+            self._pair_phase = "waiting"
+            self._pair_task = self.hass.async_create_task(
+                asyncio.to_thread(self._stick_found_event.wait, _PAIRING_TIMEOUT)
+            )
+            return self.async_show_progress(
+                step_id="pair_device",
+                progress_action="pair_device_waiting",
+                progress_task=self._pair_task,
+                description_placeholders=self._pair_placeholders(),
+            )
+
+        if self._pair_phase == "waiting":
+            if self._pair_task and not self._pair_task.done():
+                return self.async_show_progress(
+                    step_id="pair_device",
+                    progress_action="pair_device_waiting",
+                    progress_task=self._pair_task,
+                    description_placeholders=self._pair_placeholders(),
+                )
+            if self._result_holder.get("error"):
+                self._pair_abort_reason = "cannot_connect"
+                await self._pair_cleanup_serial(coordinator)
+                return self.async_show_progress_done(next_step_id="pair_device_failed")
+            if not (self._stick_found_event and self._stick_found_event.is_set()):
+                self._pair_abort_reason = "pairing_timeout"
+                await self._pair_cleanup_serial(coordinator)
+                return self.async_show_progress_done(next_step_id="pair_device_failed")
+
+            # Stick identified - now wait for the paired device to announce
+            # itself once the user triggers it from the Wandsender.
+            self._pair_phase = "scanning"
+            self._pair_task = self.hass.async_create_task(
+                asyncio.to_thread(self._device_found_event.wait, _PAIRING_TIMEOUT)
+            )
+            return self.async_show_progress(
+                step_id="pair_device",
+                progress_action="pair_device_scanning",
+                progress_task=self._pair_task,
+                description_placeholders=self._pair_placeholders(),
+            )
+
+        if self._pair_phase == "scanning":
+            if self._pair_task and not self._pair_task.done():
+                return self.async_show_progress(
+                    step_id="pair_device",
+                    progress_action="pair_device_scanning",
+                    progress_task=self._pair_task,
+                    description_placeholders=self._pair_placeholders(),
+                )
+            if not self._result_holder.get("device_snr_hex"):
+                self._pair_abort_reason = (
+                    "cannot_connect"
+                    if self._result_holder.get("error")
+                    else "pairing_timeout"
+                )
+                await self._pair_cleanup_serial(coordinator)
+                return self.async_show_progress_done(next_step_id="pair_device_failed")
+
+            # Device SNR captured - close our probe port and reconnect the
+            # coordinator, then do a normal scan to pick up its device_type /
+            # product_type before offering it on the select_devices form.
+            # Set the phase to "rescanning" BEFORE cleanup so its "coordinator
+            # still disconnected" fallback reconnect is skipped - we start the
+            # real reconnect ourselves right below instead of racing it.
+            self._pair_phase = "rescanning"
+            await self._pair_cleanup_serial(coordinator)
+            self._pair_task = self.hass.async_create_task(coordinator.async_connect())
+            return self.async_show_progress(
+                step_id="pair_device",
+                progress_action="pair_device_reconnecting",
+                progress_task=self._pair_task,
+                description_placeholders=self._pair_placeholders(),
+            )
+
+        # --- Phase "rescanning": coordinator reconnected, now scan ---
+        if self._pair_task and not self._pair_task.done():
+            return self.async_show_progress(
+                step_id="pair_device",
+                progress_action="pair_device_reconnecting",
+                progress_task=self._pair_task,
+                description_placeholders=self._pair_placeholders(),
+            )
+        if self._pair_task and self._pair_task.exception() is not None:
+            _LOGGER.error(
+                "Failed to reconnect coordinator after pair_device: %s",
+                self._pair_task.exception(),
+            )
+            self._pair_abort_reason = "cannot_connect"
+            return self.async_show_progress_done(next_step_id="pair_device_failed")
+
+        device_snr = self._result_holder.get("device_snr")
+        scanned = await coordinator.async_scan_devices(auto_assign=False)
+        existing_snrs = {
+            int(d["snr"])
+            for d in self.config_entry.data.get(CONF_DEVICES, [])
+            if d.get("snr") is not None
+        }
+        self._discovered_devices = [
+            d
+            for d in scanned
+            if d.get("device_type", "") in SUPPORTED_DEVICE_TYPES
+            and d.get("snr") is not None
+            and int(d["snr"]) not in existing_snrs
+        ]
+
+        if not self._discovered_devices:
+            # The device answered the Wandsender's join but not our broadcast
+            # scan afterwards (e.g. it went back to sleep) - tell the user its
+            # SNR was captured so they know pairing itself worked.
+            self._pair_abort_reason = "device_not_in_scan"
+            return self.async_show_progress_done(next_step_id="pair_device_failed")
+
+        # Put the freshly paired device first in the selection list.
+        self._discovered_devices.sort(
+            key=lambda d: 0 if int(d.get("snr", -1)) == device_snr else 1
+        )
+        return self.async_show_progress_done(next_step_id="select_devices")
+
+    async def _pair_cleanup_serial(self, coordinator) -> None:
+        """Stop the pairing listener, close our probe port, reconnect the coordinator.
+
+        Safe to call multiple times; only performs work once per invocation of
+        the flow (subsequent calls act on already-cleared state).
+        """
+        if self._stop_event:
+            self._stop_event.set()
+        if self._listen_thread and self._listen_thread.is_alive():
+            await self.hass.async_add_executor_job(self._listen_thread.join, 2.0)
+        self._listen_thread = None
+        if self._serial_obj:
+            try:
+                await self.hass.async_add_executor_job(self._serial_obj.close)
+            except Exception:  # pylint: disable=broad-except
+                pass
+            self._serial_obj = None
+        # Reconnect the coordinator so the integration keeps working even if
+        # pairing failed/timed out. The "rescanning" phase already reconnects
+        # explicitly on the success path, so avoid double-connecting.
+        if coordinator.stick is None and self._pair_phase != "rescanning":
+            try:
+                await coordinator.async_connect()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception(
+                    "Failed to reconnect coordinator after pair_device cleanup"
+                )
+
+    async def async_step_pair_device_failed(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Abort the flow after a pair_device failure or timeout."""
+        return self.async_abort(reason=self._pair_abort_reason or "pairing_timeout")
+
+    def _pair_placeholders(self) -> dict[str, str]:
+        """Return description placeholders for the pair_device progress dialog."""
+        snr = self._result_holder.get("snr")
+        device_snr = self._result_holder.get("device_snr")
+        return {
+            "snr": str(snr) if snr else "—",
+            "device_snr": str(device_snr) if device_snr else "—",
+        }
 
     async def async_step_select_devices(
         self, user_input: dict[str, Any] | None = None
