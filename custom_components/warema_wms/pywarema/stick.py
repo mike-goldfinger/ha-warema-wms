@@ -63,6 +63,7 @@ from .protocol import (
     encode_cmd,
     manual_position_from_byte,
     manual_position_to_byte,
+    pos_percent_to_hex,
     product_angle_from_byte,
     product_angle_to_byte,
     product_type_name,
@@ -443,17 +444,31 @@ class WmsStick:
         self,
         blind_id,
         position: int,
-        angle: int,
+        angle: Optional[int],
         on_complete: Optional[Callable] = None,
+        valance_1: Optional[int] = None,
+        valance_2: Optional[int] = None,
     ) -> None:
         """Move a blind to the specified position and angle.
 
         Args:
             blind_id: snr, snr_hex, or name
             position: 0-100 (0=open, 100=closed)
-            angle: -100 to +100 (slat angle)
+            angle: -100 to +100 (slat angle), or None to leave the slats alone
             on_complete: Optional callback(error, msg_sent, msg_rcv) called when
                          the motor acknowledges the command.
+            valance_1: 0-100 valance position, or None to leave it alone.
+            valance_2: second valance channel, same convention.
+
+        A valance is driven by this same command: the frame is one target
+        state covering every axis, which is why the valance arguments extend
+        this method rather than getting a command of their own.
+
+        The motor orders the axes of a frame itself: asked to extend and
+        lower the valance at once it extends first, pauses, then lowers, and
+        it never drags a lowered valance while the cover travels - it raises
+        the valance, moves, and lowers it again at the destination. A lowered
+        valance is accepted at any cover position.
         """
         blind = self._get_blind(blind_id)
         if not blind:
@@ -462,7 +477,21 @@ class WmsStick:
             )
             return
 
-        blind.pos_requested = BlindPosition(pos=position, ang=angle, moving=True)
+        blind.pos_requested = BlindPosition(
+            pos=position,
+            ang=blind.pos_current.ang if angle is None else angle,
+            moving=True,
+            valance_1=(
+                blind.pos_current.valance_1
+                if valance_1 is None
+                else pos_percent_to_hex(valance_1)
+            ),
+            valance_2=(
+                blind.pos_current.valance_2
+                if valance_2 is None
+                else pos_percent_to_hex(valance_2)
+            ),
+        )
 
         def _on_complete(error, msg_sent, msg_rcv):
             # error is "" (empty string) on success, "timeout" on timeout
@@ -471,18 +500,30 @@ class WmsStick:
                 # cannot read the slat angle back (returns 0xFF while raised), so
                 # without this the tilt state would never reflect what we just
                 # commanded and the UI would appear "stuck".
+                # The valance is adopted the same way: it is reported by the
+                # position poll, but only once the motor has finished moving
+                # it, so without this the slider would snap back mid-travel.
                 new_pos = BlindPosition(
                     pos=blind.pos_current.pos,
                     ang=blind.pos_requested.ang,
                     moving=True,
-                    valance_1=blind.pos_current.valance_1,
-                    valance_2=blind.pos_current.valance_2,
+                    valance_1=blind.pos_requested.valance_1,
+                    valance_2=blind.pos_requested.valance_2,
                 )
                 self._update_blind_pos(blind, new_pos)
             if on_complete:
                 on_complete(error, msg_sent, msg_rcv)
 
-        msg = WmsMessage("blindMoveToPos", blind.snr, {"pos": position, "ang": angle})
+        msg = WmsMessage(
+            "blindMoveToPos",
+            blind.snr,
+            {
+                "pos": position,
+                "ang": angle,
+                "valance_1": valance_1,
+                "valance_2": valance_2,
+            },
+        )
         msg.on_end = _on_complete
         self._enqueue(msg, priority=True)
         threading.Timer(DELAY_MSG_PROC, self._process_queue).start()

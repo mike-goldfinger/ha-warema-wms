@@ -60,6 +60,10 @@ async def async_setup_entry(
     coordinator: WaremaCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities = []
+    # Metadata of every cover we create, keyed by integer SNR. A valance is not
+    # a device of its own - it belongs to the cover's motor - so its entity
+    # reuses this to attach to the same HA device.
+    cover_meta: dict[int, dict] = {}
 
     # Per-device position inversion, keyed by string SNR (see OPT_INVERT_POSITION).
     invert_map = entry.options.get(OPT_INVERT_POSITION, {})
@@ -95,6 +99,12 @@ async def async_setup_entry(
                         invert=bool(invert_map.get(str(snr_int), False)),
                     )
                 )
+                cover_meta[snr_int] = {
+                    "snr_hex": snr_hex,
+                    "name": name,
+                    "device_type_str": device_type_str,
+                    "product_type": device.get("product_type"),
+                }
     else:
         # No devices configured: scan and add all blinds
         _LOGGER.info("No devices configured, scanning for WMS devices...")
@@ -121,12 +131,68 @@ async def async_setup_entry(
                         invert=bool(invert_map.get(str(snr), False)),
                     )
                 )
+                cover_meta[snr] = {
+                    "snr_hex": snr_hex,
+                    "name": name,
+                    "device_type_str": device_type_str,
+                    "product_type": device.get("product_type"),
+                }
 
     if entities:
         async_add_entities(entities)
         _LOGGER.info("Added %d Warema WMS cover entities", len(entities))
     else:
         _LOGGER.warning("No Warema WMS cover entities found")
+
+    # ------------------------------------------------------------------
+    # Valance entities
+    # ------------------------------------------------------------------
+    # Whether a motor drives a valance cannot be configured or asked for: the
+    # position frame simply reports 0xFF for a channel that is not there, which
+    # the coordinator surfaces as None. So we watch the live data and create the
+    # entity the first time a channel reports a real value.
+    #
+    # Deliberately driven by observed data rather than by device type or by a
+    # flag stored at config time: a motor that was asleep during setup reports
+    # nothing, and a control entity that appears for hardware that has no
+    # valance would let a user command an axis that does not exist.
+    known_valances: set[tuple[int, int]] = set()
+
+    @callback
+    def _discover_valances() -> None:
+        """Add valance entities for channels that have reported a value."""
+        new_entities = []
+        for snr, state in (coordinator.data or {}).items():
+            meta = cover_meta.get(snr)
+            if meta is None:
+                continue
+            for valance_num, value in ((1, state.valance_1), (2, state.valance_2)):
+                if value is None or (snr, valance_num) in known_valances:
+                    continue
+                known_valances.add((snr, valance_num))
+                _LOGGER.info(
+                    "Valance %d detected on SNR=%d (%s), adding control entity",
+                    valance_num,
+                    snr,
+                    meta["snr_hex"],
+                )
+                new_entities.append(
+                    WaremaValanceCover(
+                        coordinator=coordinator,
+                        snr=snr,
+                        snr_hex=meta["snr_hex"],
+                        device_name=meta["name"],
+                        device_type_str=meta["device_type_str"],
+                        product_type=meta["product_type"],
+                        valance_num=valance_num,
+                        entry_id=entry.entry_id,
+                    )
+                )
+        if new_entities:
+            async_add_entities(new_entities)
+
+    entry.async_on_unload(coordinator.async_add_listener(_discover_valances))
+    _discover_valances()
 
 
 def _device_class_for(product_type: int | None) -> CoverDeviceClass:
@@ -561,4 +627,220 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
             "wms_position": state.position if state else -1,
             "wms_angle": state.angle if state else 0,
             "moving": state.moving if state else False,
+        }
+
+
+class WaremaValanceCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
+    """A motor's valance, exposed as a cover of its own.
+
+    A valance (Volant) is the fabric drop at the front of an awning. It is a
+    second motorised axis on the *same* motor as the cover, not a device of its
+    own, so this entity attaches to the cover's HA device.
+
+    Position convention: WMS 100 = fully lowered = HA "closed", i.e. the plain
+    mapping. This deliberately ignores OPT_INVERT_POSITION, which describes
+    which end of the *cover's* travel a user considers closed - the valance
+    only ever drops downwards, so there is nothing to invert.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = CoverDeviceClass.SHADE
+    _attr_supported_features = (
+        CoverEntityFeature.OPEN
+        | CoverEntityFeature.CLOSE
+        | CoverEntityFeature.STOP
+        | CoverEntityFeature.SET_POSITION
+    )
+
+    def __init__(
+        self,
+        coordinator: WaremaCoordinator,
+        snr: int,
+        snr_hex: str,
+        device_name: str,
+        device_type_str: str,
+        product_type: int | None,
+        valance_num: int,
+        entry_id: str,
+    ) -> None:
+        """Initialize the valance cover entity."""
+        super().__init__(coordinator, context=snr)
+        self._snr = snr
+        self._snr_hex = snr_hex
+        self._device_name = device_name
+        self._device_type_str = device_type_str
+        self._product_type = product_type
+        self._valance_num = valance_num
+        self._entry_id = entry_id
+
+        self._attr_name = f"Valance {valance_num}"
+        self._attr_unique_id = f"{DOMAIN}_{snr_hex}_valance_{valance_num}_cover"
+
+        self._command_is_opening = False
+        self._command_is_closing = False
+
+    def _get_blind_state(self):
+        """Get the current blind state from coordinator data."""
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.get(self._snr)
+
+    def _get_valance(self) -> int | None:
+        """Return this channel's WMS valance position, or None if unknown."""
+        state = self._get_blind_state()
+        if not state:
+            return None
+        return state.valance_1 if self._valance_num == 1 else state.valance_2
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info: the same device as the cover it belongs to."""
+        model = self._device_type_str
+        if self._product_type is not None:
+            model = f"{product_type_name(self._product_type)} ({self._device_type_str})"
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._snr_hex)},
+            name=self._device_name,
+            manufacturer="Warema",
+            model=model,
+            via_device=(DOMAIN, self._entry_id),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Available while the channel keeps reporting a position."""
+        return super().available and self._get_valance() is not None
+
+    @property
+    def current_cover_position(self) -> int | None:
+        """Return valance position in HA convention (0=lowered, 100=raised)."""
+        valance = self._get_valance()
+        if valance is None:
+            return None
+        return _wms_pos_to_ha(valance)
+
+    @property
+    def is_closed(self) -> bool | None:
+        """Return True when the valance is fully lowered (WMS 100)."""
+        valance = self._get_valance()
+        if valance is None:
+            return None
+        return valance >= 100
+
+    @property
+    def is_opening(self) -> bool:
+        """Return True while a raise command is in progress."""
+        state = self._get_blind_state()
+        return bool(state and state.moving and self._command_is_opening)
+
+    @property
+    def is_closing(self) -> bool:
+        """Return True while a lower command is in progress."""
+        state = self._get_blind_state()
+        return bool(state and state.moving and self._command_is_closing)
+
+    async def _async_send_valance(self, wms_valance: int) -> bool:
+        """Send a valance target together with a cover position.
+
+        The frame is one target state for every axis, so it has to name a
+        cover position. We send the position the cover is already at, which
+        leaves it where it is and moves only the valance.
+
+        No cover position is refused. Verified on an awning (type 25): the
+        motor never drags a lowered valance while the cover travels - it
+        raises the valance, moves, and lowers it again at the destination -
+        and it accepts a lowered valance at any cover position, including
+        fully retracted. Both are the manufacturer's behaviour, not something
+        this integration should second-guess: lowering the valance at a
+        partial extension is a real use case when the sun is low.
+
+        Returns False when the cover position is not known yet: the frame has
+        to state one, and inventing a value would move the cover. Mirrors how
+        the tilt commands handle the same situation.
+        """
+        state = self._get_blind_state()
+        if not state or state.position < 0:
+            _LOGGER.warning(
+                "WaremaValanceCover: SNR=%d: cover position unknown, requesting update",
+                self._snr,
+            )
+            await self.hass.async_add_executor_job(
+                self.coordinator.get_position, self._snr
+            )
+            return False
+        position = state.position
+
+        _LOGGER.debug(
+            "WaremaValanceCover: SNR=%d (%s) valance_%d -> %d (cover pos=%d)",
+            self._snr,
+            self._snr_hex,
+            self._valance_num,
+            wms_valance,
+            position,
+        )
+        kwargs = {f"valance_{self._valance_num}": wms_valance}
+        await self.hass.async_add_executor_job(
+            lambda: self.coordinator.set_valance(self._snr, position, **kwargs)
+        )
+        return True
+
+    async def async_open_cover(self, **kwargs: Any) -> None:
+        """Raise the valance fully (WMS 0)."""
+        if not await self._async_send_valance(0):
+            return
+        self._command_is_opening = True
+        self._command_is_closing = False
+        self.async_write_ha_state()
+
+    async def async_close_cover(self, **kwargs: Any) -> None:
+        """Lower the valance fully (WMS 100)."""
+        if not await self._async_send_valance(100):
+            return
+        self._command_is_opening = False
+        self._command_is_closing = True
+        self.async_write_ha_state()
+
+    async def async_set_cover_position(self, **kwargs: Any) -> None:
+        """Move the valance to a specific position."""
+        ha_pos = kwargs[ATTR_POSITION]
+        current_ha = self.current_cover_position
+        if not await self._async_send_valance(_ha_pos_to_wms(ha_pos)):
+            return
+        if current_ha is not None:
+            self._command_is_opening = ha_pos > current_ha
+            self._command_is_closing = ha_pos < current_ha
+        else:
+            self._command_is_opening = False
+            self._command_is_closing = False
+        self.async_write_ha_state()
+
+    async def async_stop_cover(self, **kwargs: Any) -> None:
+        """Stop the motor.
+
+        The stop frame addresses the motor, not one axis, so this also stops
+        the cover if it happens to be moving.
+        """
+        _LOGGER.debug("WaremaValanceCover: stop SNR=%d (%s)", self._snr, self._snr_hex)
+        await self.hass.async_add_executor_job(self.coordinator.stop, self._snr)
+        self._command_is_opening = False
+        self._command_is_closing = False
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Clear direction flags once the motor reports it has stopped."""
+        state = self._get_blind_state()
+        if state and not state.moving:
+            self._command_is_opening = False
+            self._command_is_closing = False
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes."""
+        return {
+            "snr": self._snr,
+            "snr_hex": self._snr_hex,
+            "valance_channel": self._valance_num,
+            "wms_valance": self._get_valance(),
         }
