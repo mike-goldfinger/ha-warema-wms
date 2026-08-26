@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.8.0] - 2026-08-26
 
 ### Added
 - **Valance control.** A motor's valance is now a `cover` entity of its own
