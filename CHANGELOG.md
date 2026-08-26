@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Valance control.** A motor's valance is now a `cover` entity of its own
+  (*Valance 1* / *Valance 2*) on the same device, with open, close, stop and
+  set-position, alongside the read-only sensors added in 1.6.x. The valance
+  travels in the two settings bytes that the manual command frame already
+  reserved and that this integration previously sent as a fixed `FFFF`; they
+  use the same encoding as a position (percent × 2), with `0xFF` meaning
+  "leave this channel alone". Verified against a Warema awning with a valance
+  (device type 25). (Resolves the remaining part of #4.)
+
+  A valance entity appears only for a channel that has actually reported a
+  position, so hardware without a valance is untouched — no new entities, and
+  every command frame it receives is byte-for-byte what it received before.
+
+  The valance and the cover move independently: a valance command carries the
+  position the cover is already at, and a cover command leaves the valance
+  masked. Verified on hardware that the motor handles the awkward cases
+  itself - it raises a lowered valance before travelling and lowers it again
+  at the destination rather than dragging it, and it accepts a lowered valance
+  at any cover position, including retracted.
+
 ## [1.7.0] - 2026-07-26
 
 ### Added

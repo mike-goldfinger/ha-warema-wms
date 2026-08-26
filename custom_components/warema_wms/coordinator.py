@@ -406,6 +406,35 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
         if self.stick:
             self.stick.blind_set_position(snr, 100, 100)
 
+    def set_valance(
+        self,
+        snr: int,
+        position: int,
+        valance_1: int | None = None,
+        valance_2: int | None = None,
+    ) -> None:
+        """Move a valance, carrying the cover position it belongs to.
+
+        One frame is a single target state covering every axis, so a valance
+        command always states where the cover should be as well. Pass the
+        position the cover is already at to move the valance alone. The slat
+        angle is masked (left untouched).
+
+        Args:
+            snr: Integer serial number of the blind.
+            position: 0-100 WMS cover position sent alongside the valance.
+            valance_1: 0-100 valance position, or None to leave it alone.
+            valance_2: second valance channel, same convention.
+        """
+        if self.stick:
+            self.stick.blind_set_position(
+                snr,
+                position,
+                None,
+                valance_1=valance_1,
+                valance_2=valance_2,
+            )
+
     def set_light_level(self, snr: int, level: int) -> None:
         """Set the brightness of a dimming actuator.
 

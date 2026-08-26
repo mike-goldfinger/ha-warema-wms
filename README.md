@@ -23,6 +23,7 @@
 ## ✨ Features
 
 - 🪟 **Full blind control** — Open, close, stop, set position and tilt angle
+- 🎪 **Valance control** — Awning valances as their own cover entities (open, close, stop, position)
 - 💡 **Light control** — WMS dimming actuators as dimmable light entities (brightness + on/off)
 - 📊 **Real-time monitoring** — Position, angle, and motion detection sensors
 - 🌦️ **Weather station support** — Temperature, wind, brightness and rain sensors, auto-discovered from WMS weather-station broadcasts
@@ -182,6 +183,38 @@ Each blind appears as a `cover` entity with:
 > get tilt controls; awnings and roller shutters do not — regardless of which
 > actuator hardware drives them. See *Supported Devices* above for the full
 > product-type table.
+
+### Valance Entities
+
+An awning's valance (the fabric drop at the front) is a second motorised axis
+on the *same* motor as the cover. Each valance channel that reports a position
+appears as its own `cover` entity, *Valance 1* / *Valance 2*, on the cover's
+device:
+
+| Control | Range | Notes |
+|---------|-------|-------|
+| **Position** | 0–100% | 0 = fully lowered, 100 = fully raised |
+| **Open** | — | Raise the valance fully |
+| **Close** | — | Lower the valance fully |
+| **Stop** | — | Stops the motor — including the cover, if it is moving |
+
+> **Auto-detection:** there is no flag that announces a valance. The position
+> frame simply reports `0xFF` for a channel that is not there, so the entity is
+> created the first time a channel reports a real value — within one position
+> poll of startup. Hardware without a valance never gets the entity.
+
+> **Position convention:** the valance is not affected by the per-device
+> *invert position* option. That option describes which end of the *cover's*
+> travel you consider closed; a valance only ever drops downwards, so lowered
+> is always "closed".
+
+> **The two axes move independently.** A valance command carries the position
+> the cover is already at, so only the valance moves, and a cover command
+> leaves the valance untouched. The motor handles the awkward cases itself: it
+> never drags a lowered valance while the cover travels — it raises it, moves,
+> and lowers it again at the destination — and it accepts a lowered valance at
+> any cover position, which is what makes a valance useful at a partial
+> extension when the sun is low.
 
 ### Sensor Entities
 - **Motor SNR** — Serial number (6-digit hex)

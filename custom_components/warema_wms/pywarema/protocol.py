@@ -162,6 +162,19 @@ def pos_hex_to_percent(pos_hex: str) -> int:
     return round(int(pos_hex, 16) / 2)
 
 
+def valance_percent_to_hex(valance_percent: int | None) -> str:
+    """Convert a valance percentage to its 2-char hex settings byte.
+
+    A valance uses the same encoding as a position (percent * 2). ``None``
+    means "leave this channel alone" and maps to the 0xFF sentinel the
+    protocol uses for an unset settings byte - the same value the position
+    frame reports back for a channel the device does not have.
+    """
+    if valance_percent is None:
+        return "FF"
+    return pos_percent_to_hex(valance_percent)
+
+
 def angle_percent_to_hex(ang_percent: int) -> str:
     """Convert angle percentage (-100 to +100) to 2-char hex string.
 
@@ -383,6 +396,17 @@ def encode_cmd(cmd: str, snr, params: dict) -> dict:
     elif cmd == "blindMoveToPos":
         pos = params.get("pos", 0)
         ang = params.get("ang", 0)
+        # Valance channels. The manual-command frame carries them in the two
+        # settings bytes after the angle, encoded exactly like a position
+        # (percent * 2). 0xFF is the protocol's "leave unchanged" sentinel and
+        # stays the default, so a caller that does not mention a valance emits
+        # a byte-for-byte identical frame to one that never knew about them.
+        valance_1 = params.get("valance_1")
+        valance_2 = params.get("valance_2")
+        # ``ang=None`` masks the slat angle with the same 0xFF sentinel, so a
+        # valance-only move leaves the slats where they are. Callers that pass
+        # a real angle are unaffected.
+        ang_hex = "FF" if ang is None else angle_percent_to_hex(ang)
         result["expect"]["msg_type"] = "blindMoveToPosResponse"
         result["expect"]["snr"] = snr_hex
         result["cmd"] = (
@@ -391,8 +415,10 @@ def encode_cmd(cmd: str, snr, params: dict) -> dict:
             + "7070"
             + "03"
             + pos_percent_to_hex(pos)
-            + angle_percent_to_hex(ang)
-            + "FFFF}"
+            + ang_hex
+            + valance_percent_to_hex(valance_1)
+            + valance_percent_to_hex(valance_2)
+            + "}"
         )
 
     elif cmd == "lightSetLevel":
