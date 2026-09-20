@@ -199,7 +199,16 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
         # still lack info, so steady-state startup cost is zero. The result is
         # persisted back to entry.data so the lookup never repeats.
         await self._enrich_product_info()
-        await self.async_refresh_motor_params()
+
+        # Motor parameter reads are diagnostics, not a prerequisite for cover
+        # setup. Each motor requires several serial requests, so waiting here
+        # can delay setup for tens of seconds when a receiver is unreachable.
+        # Run the refresh independently and notify the diagnostic entities once
+        # it has data.
+        self.hass.async_create_background_task(
+            self.async_refresh_motor_params(),
+            f"{DOMAIN} motor parameter refresh",
+        )
 
     async def _enrich_product_info(self) -> None:
         """Fill in missing product_type / is_with_blinds for blinds.

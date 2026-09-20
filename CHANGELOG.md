@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+- **Device discovery can now start from an idle command queue.** Starting a
+  network scan enqueued its three scan requests but did not wake the USB-stick
+  queue processor. If no other WMS command followed, Home Assistant waited for
+  the scan timeout and reported no devices even though they were reachable.
+- **Cover setup is no longer blocked by optional motor diagnostics.** Reading
+  firmware parameters requires several serial requests per motor. These reads
+  now continue in the background after the covers are available, avoiding long
+  startup delays when a receiver is slow or temporarily unreachable.
+
 ## [1.8.0] - 2026-08-26
 
 ### Added

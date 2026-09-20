@@ -334,6 +334,10 @@ class WmsStick:
         msg = WmsMessage("scanRequest", 0, {"pan_id": self.pan_id})
         msg.on_end = finish_scan
         self._enqueue(msg)
+        # A scan is normally started after the command queue has gone idle.
+        # Wake it explicitly; otherwise the scan requests remain queued until
+        # another command happens to restart queue processing.
+        threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
 
     def blind_add(self, snr, name: str) -> Blind:
         """Add a blind to the stick's device list.
