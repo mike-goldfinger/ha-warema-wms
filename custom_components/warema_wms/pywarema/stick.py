@@ -56,6 +56,7 @@ from .protocol import (
     PRODUCT_TYPES_WITH_TILT,
     SW_INFO_ADDR,
     SW_INFO_BLOCK,
+    SW_INFO_DEVICE_TYPE_OFFSET,
     SW_INFO_SIZE,
     has_standard_param_layout,
     MotorParameters,
@@ -892,9 +893,10 @@ class WmsStick:
         Returns a ``(software_version, device_type_name)`` tuple.  Both values
         may be ``None`` if the read fails or the device does not support Block 81.
 
-        The exact byte layout of Block 81 is not yet fully documented.  The raw
-        bytes are logged at INFO level so the correct offsets can be derived from
-        a known reference value (e.g. software_version "5930141007").
+        Layout verified against WMS Studio Pro's own read of this block
+        (``ReadDeviceMetaDataConvBlock81Conv``): starting at ``SW_INFO_ADDR``
+        (24), the software version is an 11-char Latin-1 string at offset 0
+        and the device-type byte is at ``SW_INFO_DEVICE_TYPE_OFFSET`` (19).
         """
         blind = self._get_blind(blind_id)
         if not blind:
@@ -916,22 +918,19 @@ class WmsStick:
 
         _LOGGER.info("Block81 raw for %s: %s", blind.snr_hex, data.hex())
 
-        # Decode software version (dataTypeId 288): try to interpret as a
-        # 10-digit BCD number encoded in 5 bytes at offset 0, or as a 4-byte
-        # little-endian uint32.  After the first real test the correct decoder
-        # should replace these placeholders.
         sw_ver: Optional[str] = None
         dev_type: Optional[str] = None
         try:
-            # Attempt BCD decode of first 5 bytes
-            bcd = data[:5].hex()
-            sw_ver = str(int(bcd))  # strips leading zeros from BCD string
+            raw = data[0:11]
+            # WMS-compliant Latin-1 string: 0xFF/0x00 padding after the text.
+            end = next((i for i, b in enumerate(raw) if b in (0x00, 0xFF)), len(raw))
+            sw_ver = raw[:end].decode("latin-1").strip() or None
         except Exception:  # pylint: disable=broad-except
-            sw_ver = data[:5].hex() if len(data) >= 5 else None
+            sw_ver = data[0:11].hex() if len(data) >= 11 else None
 
         try:
-            if len(data) >= 6:
-                dev_type = f"0x{data[5]:02X}"
+            if len(data) > SW_INFO_DEVICE_TYPE_OFFSET:
+                dev_type = f"0x{data[SW_INFO_DEVICE_TYPE_OFFSET]:02X}"
         except Exception:  # pylint: disable=broad-except
             pass
 
