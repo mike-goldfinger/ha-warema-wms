@@ -12,6 +12,14 @@ All notable changes to this project will be documented in this file.
   number", which reads the device directly (product type, device type,
   firmware version) once its serial number is known - no re-pairing or
   Wandsender handshake required. See issue #8.
+- **Per-device key/transmission mode.** Until now every unicast frame was sent
+  with the factory key (`R06`). Radio motors answer that, but WMS Studio Pro
+  addresses networked devices with the network key (`R11`), and some actuators
+  - apparently including dimmers - answer nothing else. "Add a device by
+  serial number" now probes `R11`, `R16`, `R01` and `R06`, stores the mode the
+  device answers on, and uses it for all later commands to that device. If a
+  device only answers on the broadcast PAN (`FFFF`), it never joined the
+  network; this is logged but the device cannot be added. See issue #8.
 
 ### Fixed
 - **Device discovery can now start from an idle command queue.** Starting a

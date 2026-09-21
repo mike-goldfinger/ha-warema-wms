@@ -165,6 +165,7 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
                 # If absent (config from old version), it will be filled in
                 # lazily after init via _enrich_product_info().
                 if blind is not None:
+                    blind.radio_mode = device.get("radio_mode", blind.radio_mode)
                     pt = device.get("product_type")
                     if pt is not None:
                         blind.product_type = pt
@@ -405,6 +406,11 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
                 self.stick.blind_add, snr, probe_name
             )
             try:
+                radio_mode, pan_id = await self.hass.async_add_executor_job(
+                    self.stick.probe_radio_mode, snr
+                )
+                if radio_mode is None or pan_id != self.stick.pan_id:
+                    return None
                 sw_ver, dev_type_hex = await self.hass.async_add_executor_job(
                     self.stick.read_block81_info, snr
                 )
@@ -431,6 +437,7 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
                     "product_type_str": product_type_name(product_type),
                     "is_with_blinds": is_with_blinds,
                     "software_version": sw_ver,
+                    "radio_mode": radio_mode,
                 }
             finally:
                 if not already_registered:
