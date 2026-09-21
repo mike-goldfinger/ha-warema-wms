@@ -56,6 +56,7 @@ from .protocol import (
     PRODUCT_TYPES_WITH_TILT,
     SW_INFO_ADDR,
     SW_INFO_BLOCK,
+    SW_INFO_DEVICE_TYPE_OFFSET,
     SW_INFO_SIZE,
     has_standard_param_layout,
     MotorParameters,
@@ -91,6 +92,14 @@ CMD_SETTINGS = {
 }
 DEFAULT_TIMEOUT = 2.0
 DEFAULT_RETRY = -1  # -1 = no retry
+
+# "{R<key mode><transmission mode>": key 0 = factory key, 1 = network key;
+# transmission 1 = P2P, 6 = WideP2P (Studio: EWMSKeyMode / EWMSTransmissionMode).
+DEFAULT_RADIO_MODE = "06"
+PROBE_RADIO_MODES = ("11", "16", "01", DEFAULT_RADIO_MODE)
+# Devices that never joined a network listen on the broadcast PAN with the factory key.
+BROADCAST_PAN_ID = "FFFF"
+BROADCAST_PAN_RADIO_MODES = ("01", DEFAULT_RADIO_MODE)
 
 # Retry count for background position polls (pos-upd / watch-moving). The full
 # CMD_SETTINGS retry (5) is meant for one-shot user queries; a periodic 5 s poll
@@ -147,6 +156,10 @@ class Blind:
     product_type: int | None = None
     product_type_str: str | None = None
     is_with_blinds: bool | None = None  # True if the motor has tilting slats
+    # Two digits after "{R" in unicast frames: key mode + transmission mode.
+    # Radio motors answer the factory key ("06"); some actuators (dimmers)
+    # only answer the network key ("11"), as WMS Studio Pro uses by default.
+    radio_mode: str = DEFAULT_RADIO_MODE
 
 
 class WmsMessage:
@@ -178,6 +191,13 @@ class WmsMessage:
         self.on_end: Optional[Callable] = None
         self.queued_ts = time.time()
         self.com_ts: Optional[float] = None
+
+    def apply_radio_mode(self, radio_mode: str) -> None:
+        """Re-address a default-mode unicast frame with another radio mode."""
+        default_prefix = "{R" + DEFAULT_RADIO_MODE
+        frame = self.stick_cmd["cmd"]
+        if radio_mode != DEFAULT_RADIO_MODE and frame.startswith(default_prefix):
+            self.stick_cmd["cmd"] = "{R" + radio_mode + frame[len(default_prefix) :]
 
 
 class WmsStick:
@@ -892,9 +912,10 @@ class WmsStick:
         Returns a ``(software_version, device_type_name)`` tuple.  Both values
         may be ``None`` if the read fails or the device does not support Block 81.
 
-        The exact byte layout of Block 81 is not yet fully documented.  The raw
-        bytes are logged at INFO level so the correct offsets can be derived from
-        a known reference value (e.g. software_version "5930141007").
+        Layout verified against WMS Studio Pro's own read of this block
+        (``ReadDeviceMetaDataConvBlock81Conv``): starting at ``SW_INFO_ADDR``
+        (24), the software version is an 11-char Latin-1 string at offset 0
+        and the device-type byte is at ``SW_INFO_DEVICE_TYPE_OFFSET`` (19).
         """
         blind = self._get_blind(blind_id)
         if not blind:
@@ -916,22 +937,19 @@ class WmsStick:
 
         _LOGGER.info("Block81 raw for %s: %s", blind.snr_hex, data.hex())
 
-        # Decode software version (dataTypeId 288): try to interpret as a
-        # 10-digit BCD number encoded in 5 bytes at offset 0, or as a 4-byte
-        # little-endian uint32.  After the first real test the correct decoder
-        # should replace these placeholders.
         sw_ver: Optional[str] = None
         dev_type: Optional[str] = None
         try:
-            # Attempt BCD decode of first 5 bytes
-            bcd = data[:5].hex()
-            sw_ver = str(int(bcd))  # strips leading zeros from BCD string
+            raw = data[0:11]
+            # WMS-compliant Latin-1 string: 0xFF/0x00 padding after the text.
+            end = next((i for i, b in enumerate(raw) if b in (0x00, 0xFF)), len(raw))
+            sw_ver = raw[:end].decode("latin-1").strip() or None
         except Exception:  # pylint: disable=broad-except
-            sw_ver = data[:5].hex() if len(data) >= 5 else None
+            sw_ver = data[0:11].hex() if len(data) >= 11 else None
 
         try:
-            if len(data) >= 6:
-                dev_type = f"0x{data[5]:02X}"
+            if len(data) > SW_INFO_DEVICE_TYPE_OFFSET:
+                dev_type = f"0x{data[SW_INFO_DEVICE_TYPE_OFFSET]:02X}"
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -942,6 +960,73 @@ class WmsStick:
             dev_type,
         )
         return sw_ver, dev_type
+
+    def probe_radio_mode(self, blind_id) -> tuple[Optional[str], Optional[str]]:
+        """Find the key/transmission mode a device answers a block 81 read on.
+
+        Returns ``(radio_mode, pan_id)``; ``(None, None)`` if nothing answered.
+        On success the mode is stored on the blind. A hit on the broadcast PAN
+        is reported but not usable for control: the stick is switched back to
+        its own PAN before returning.
+        """
+        blind = self._get_blind(blind_id)
+        if not blind:
+            return None, None
+
+        def answers(radio_mode: str) -> bool:
+            blind.radio_mode = radio_mode
+            data = self._mb8_read_sync(
+                blind.snr_hex,
+                block=SW_INFO_BLOCK,
+                addr=SW_INFO_ADDR,
+                size=SW_INFO_SIZE,
+            )
+            _LOGGER.info(
+                "probe_radio_mode %s: R%s -> %s",
+                blind.snr_hex,
+                radio_mode,
+                "answer" if data else "no answer",
+            )
+            return bool(data)
+
+        for radio_mode in PROBE_RADIO_MODES:
+            if answers(radio_mode):
+                return radio_mode, self.pan_id
+
+        found = None
+        self._switch_pan_sync(BROADCAST_PAN_ID)
+        try:
+            for radio_mode in BROADCAST_PAN_RADIO_MODES:
+                if answers(radio_mode):
+                    found = radio_mode
+                    break
+        finally:
+            self._switch_pan_sync(self.pan_id)
+
+        blind.radio_mode = DEFAULT_RADIO_MODE
+        if found:
+            _LOGGER.warning(
+                "probe_radio_mode %s: answers only on broadcast PAN %s (R%s) - "
+                "device has not joined network %s",
+                blind.snr_hex,
+                BROADCAST_PAN_ID,
+                found,
+                self.pan_id,
+            )
+            return found, BROADCAST_PAN_ID
+        return None, None
+
+    def _switch_pan_sync(self, pan_id: str, timeout: float = 3.0) -> None:
+        """Point the stick at another PAN on the current channel; wait for ack."""
+        done = threading.Event()
+        msg = WmsMessage(
+            "stickSwitchChannel", 0, {"channel": self.channel, "pan_id": pan_id}
+        )
+        msg.on_end = lambda *_: done.set()
+        self._enqueue(msg)
+        threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
+        if not done.wait(timeout):
+            _LOGGER.warning("WmsStick: no ack for PAN switch to %s", pan_id)
 
     def _mb8_read_sync(
         self, snr_hex, block: int, addr: int, size: int, timeout: float = 3.0
@@ -1483,6 +1568,9 @@ class WmsStick:
 
     def _enqueue(self, msg: WmsMessage, priority: bool = False) -> None:
         """Add a message to the command queue."""
+        blind = self._blinds.get(msg.snr)
+        if blind is not None:
+            msg.apply_radio_mode(blind.radio_mode)
         with self._queue_lock:
             if priority:
                 self._msg_queue.insert(0, msg)

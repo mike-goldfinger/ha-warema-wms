@@ -316,6 +316,15 @@ Home Assistant uses different conventions than WMS:
 
 ---
 
+## ❓ FAQ
+
+**Can I use the WMS USB Stick alongside my existing proprietary remote controls?**
+
+Yes. This integration just joins your existing WMS network, like an extra remote.
+The motors keep all their pairings; you don't lose the remotes.
+
+---
+
 ## 🤝 Support & Contribution
 
 ### 🐞 Bugs
