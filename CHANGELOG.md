@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Fixed
+- **Slat-roof (Lamellendach) tilt now uses the motor's real angle range.**
+  The integration assumed every motor's slat angle spans a fixed ±75°. Slat
+  roofs (product types 27/28/29) actually span -45°..+90° - confirmed
+  against WMS Studio Pro's own parameter-type table and against hardware
+  logs in issue #7 - so their tilt position was read and commanded
+  incorrectly (e.g. "fully open" landing short of the real end stop). The
+  range is now read from the motor (Block 38) and used for both directions;
+  it falls back to the previous ±75° when unread or implausible.
+- **Slat-roof tilt no longer requires a known cover position.** These motors
+  have no position axis at all, so tilt commands were permanently blocked
+  waiting for a position that would never arrive. Tilt now works
+  independently of position; the motor frame's position byte is left
+  untouched instead of naming a value these actuators reject.
 - **Device discovery can now start from an idle command queue.** Starting a
   network scan enqueued its three scan requests but did not wake the USB-stick
   queue processor. If no other WMS command followed, Home Assistant waited for

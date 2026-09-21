@@ -377,12 +377,14 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
             return self.stick.get_blinds()
         return []
 
-    def set_position(self, snr: int, position: int, angle: int = 0) -> None:
+    def set_position(self, snr: int, position: int | None, angle: int = 0) -> None:
         """Move a blind to the specified position.
 
         Args:
             snr: Integer serial number of the blind.
-            position: 0-100 (0=open, 100=closed).
+            position: 0-100 (0=open, 100=closed), or None to leave the
+                position unchanged (tilt-only actuators, e.g. slat roofs,
+                have no position axis and reject a frame that names one).
             angle: -100 to +100 (slat angle).
         """
         if self.stick:

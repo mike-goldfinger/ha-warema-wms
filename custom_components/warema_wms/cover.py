@@ -46,7 +46,11 @@ from .const import (
     TILT_DEVICE_TYPES,
 )
 from .coordinator import WaremaCoordinator
-from .pywarema.protocol import product_type_name
+from .pywarema.protocol import (
+    WMS_ANGLE,
+    has_slat_roof_param_layout,
+    product_type_name,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -318,6 +322,12 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         self._supports_tilt = _supports_tilt_for(
             product_type, is_with_blinds, device_type
         )
+        # Slat-roof motors (Lamellendach) have no position axis at all -
+        # state.position stays -1 forever, which is expected, not an error.
+        # Every other cover type is expected to resolve a real position, so
+        # an unknown one there is worth a warning and a refresh attempt -
+        # see issue #7.
+        self._has_position_axis = not has_slat_roof_param_layout(product_type)
         features = (
             CoverEntityFeature.OPEN
             | CoverEntityFeature.CLOSE
@@ -374,11 +384,17 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
 
     @property
     def current_cover_tilt_position(self) -> int | None:
-        """Return current tilt position in HA convention (0-100)."""
+        """Return current tilt position in HA convention (0-100).
+
+        Unlike ``current_cover_position``, this does NOT gate on the cover
+        position being known: tilt-only actuators (e.g. slat roofs) never
+        report a position at all (``state.position`` stays -1 forever), yet
+        their angle is valid and available. See issue #7.
+        """
         if not self._supports_tilt:
             return None
         state = self._get_blind_state()
-        if not state or state.position < 0:
+        if not state:
             return None
         return _wms_angle_to_ha_tilt(state.angle)
 
@@ -505,6 +521,42 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
             self._command_is_closing = False
         self.async_write_ha_state()
 
+    def _position_for_tilt_command(self) -> int | None:
+        """Resolve the position to send alongside a tilt-only command.
+
+        Returns the current position when known, or ``None`` (the protocol's
+        "leave unchanged" sentinel) when it isn't. For a cover that has no
+        position axis at all (slat roofs), an unknown position is normal and
+        logged at debug level with no recovery attempt - polling will never
+        resolve it. For every other cover type, an unknown position is
+        unexpected: it's logged as a warning and a refresh is requested, but
+        the tilt command is still sent (with ``None``) rather than dropped,
+        so tilt keeps working even while the position catches up. See
+        issue #7.
+        """
+        state = self._get_blind_state()
+        if state and state.position >= 0:
+            return state.position
+        if not self._has_position_axis:
+            _LOGGER.debug(
+                "WaremaCover: tilt command SNR=%d: no position axis, "
+                "sending position=None",
+                self._snr,
+            )
+        else:
+            _LOGGER.warning(
+                "WaremaCover: tilt command SNR=%d: position unknown, "
+                "requesting update",
+                self._snr,
+            )
+            self.hass.async_create_background_task(
+                self.hass.async_add_executor_job(
+                    self.coordinator.get_position, self._snr
+                ),
+                f"{DOMAIN} tilt-command position refresh",
+            )
+        return None
+
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:
         """Open the tilt (slats to WMS angle -100), position unchanged.
 
@@ -512,50 +564,32 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         blindMoveToPos command carrying the *current* position, so only the
         slats turn while the blind stays where it is.
         """
-        state = self._get_blind_state()
-        if not state or state.position < 0:
-            _LOGGER.warning(
-                "WaremaCover: open_cover_tilt SNR=%d: position unknown, requesting update",
-                self._snr,
-            )
-            await self.hass.async_add_executor_job(
-                self.coordinator.get_position, self._snr
-            )
-            return
+        position = self._position_for_tilt_command()
 
         _LOGGER.debug(
-            "WaremaCover: open_cover_tilt SNR=%d (%s) pos=%d angle=-100",
+            "WaremaCover: open_cover_tilt SNR=%d (%s) pos=%s angle=-100",
             self._snr,
             self._snr_hex,
-            state.position,
+            position,
         )
         await self.hass.async_add_executor_job(
-            self.coordinator.set_position, self._snr, state.position, -100
+            self.coordinator.set_position, self._snr, position, -100
         )
         self._command_moving = True
         self.async_write_ha_state()
 
     async def async_close_cover_tilt(self, **kwargs: Any) -> None:
         """Close the tilt (slats to WMS angle +100), position unchanged."""
-        state = self._get_blind_state()
-        if not state or state.position < 0:
-            _LOGGER.warning(
-                "WaremaCover: close_cover_tilt SNR=%d: position unknown, requesting update",
-                self._snr,
-            )
-            await self.hass.async_add_executor_job(
-                self.coordinator.get_position, self._snr
-            )
-            return
+        position = self._position_for_tilt_command()
 
         _LOGGER.debug(
-            "WaremaCover: close_cover_tilt SNR=%d (%s) pos=%d angle=+100",
+            "WaremaCover: close_cover_tilt SNR=%d (%s) pos=%s angle=+100",
             self._snr,
             self._snr_hex,
-            state.position,
+            position,
         )
         await self.hass.async_add_executor_job(
-            self.coordinator.set_position, self._snr, state.position, 100
+            self.coordinator.set_position, self._snr, position, 100
         )
         self._command_moving = True
         self.async_write_ha_state()
@@ -569,27 +603,18 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         """
         ha_tilt = kwargs[ATTR_TILT_POSITION]
         wms_angle = _ha_tilt_to_wms_angle(ha_tilt)
-        state = self._get_blind_state()
-        if not state or state.position < 0:
-            _LOGGER.warning(
-                "WaremaCover: set_cover_tilt_position SNR=%d: position unknown, requesting update",
-                self._snr,
-            )
-            await self.hass.async_add_executor_job(
-                self.coordinator.get_position, self._snr
-            )
-            return
+        position = self._position_for_tilt_command()
 
         _LOGGER.debug(
-            "WaremaCover: set_cover_tilt_position SNR=%d (%s) ha_tilt=%d wms_angle=%d pos=%d",
+            "WaremaCover: set_cover_tilt_position SNR=%d (%s) ha_tilt=%d wms_angle=%d pos=%s",
             self._snr,
             self._snr_hex,
             ha_tilt,
             wms_angle,
-            state.position,
+            position,
         )
         await self.hass.async_add_executor_job(
-            self.coordinator.set_position, self._snr, state.position, wms_angle
+            self.coordinator.set_position, self._snr, position, wms_angle
         )
         self._command_moving = True
         self.async_write_ha_state()
