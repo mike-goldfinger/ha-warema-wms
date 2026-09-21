@@ -47,6 +47,7 @@ from .protocol import (
     ADDR_MOTOR_ROTATION,
     ADDR_RUN_TIME_DOWN,
     ADDR_RUN_TIME_UP,
+    ADDR_SLAT_ROOF_MIN_ANGLE,
     ADDR_TILTING_STEPS,
     ADDR_TILTING_TIME,
     SUPPORTED_DEVICE_TYPES,
@@ -57,8 +58,10 @@ from .protocol import (
     SW_INFO_ADDR,
     SW_INFO_BLOCK,
     SW_INFO_SIZE,
+    has_slat_roof_param_layout,
     has_standard_param_layout,
     MotorParameters,
+    angle_hex_to_percent,
     decode_frame,
     encode_cmd,
     manual_position_from_byte,
@@ -147,6 +150,12 @@ class Blind:
     product_type: int | None = None
     product_type_str: str | None = None
     is_with_blinds: bool | None = None  # True if the motor has tilting slats
+    # Real tilt-angle range in degrees, read from Block 38 (productSettings).
+    # None means "not yet read" - callers fall back to the WMS_ANGLE default
+    # (-75..+75, correct for venetian blinds). Slat-roof motors use a
+    # different, sometimes asymmetric range (e.g. -45..+90). See issue #7.
+    min_angle: int | None = None
+    max_angle: int | None = None
 
 
 class WmsMessage:
@@ -421,10 +430,14 @@ class WmsStick:
                     p.get("angle"),
                     blind.product_type,
                 )
+                # decode_frame() scaled angle_raw with the default (venetian
+                # blind) range. Re-scale it with this motor's real, possibly
+                # asymmetric range when known (e.g. slat roofs: -45..+90
+                # instead of the assumed -75..+75) - see issue #7.
+                ang = self._rescale_angle(blind, p)
                 # The position poll cannot read the slat angle back while the
                 # blind is raised (angle == None). Keep the last known angle in
                 # that case instead of discarding it.
-                ang = p.get("angle")
                 if ang is None:
                     ang = blind.pos_current.ang
                 new_pos = BlindPosition(
@@ -447,7 +460,7 @@ class WmsStick:
     def blind_set_position(
         self,
         blind_id,
-        position: int,
+        position: Optional[int],
         angle: Optional[int],
         on_complete: Optional[Callable] = None,
         valance_1: Optional[int] = None,
@@ -457,7 +470,10 @@ class WmsStick:
 
         Args:
             blind_id: snr, snr_hex, or name
-            position: 0-100 (0=open, 100=closed)
+            position: 0-100 (0=open, 100=closed), or None to leave the
+                position unchanged. Needed for tilt-only actuators (e.g.
+                slat roofs) that have no position axis and reject a frame
+                that names one - see issue #7.
             angle: -100 to +100 (slat angle), or None to leave the slats alone
             on_complete: Optional callback(error, msg_sent, msg_rcv) called when
                          the motor acknowledges the command.
@@ -482,7 +498,7 @@ class WmsStick:
             return
 
         blind.pos_requested = BlindPosition(
-            pos=position,
+            pos=blind.pos_current.pos if position is None else position,
             ang=blind.pos_current.ang if angle is None else angle,
             moving=True,
             valance_1=(
@@ -518,16 +534,20 @@ class WmsStick:
             if on_complete:
                 on_complete(error, msg_sent, msg_rcv)
 
-        msg = WmsMessage(
-            "blindMoveToPos",
-            blind.snr,
-            {
-                "pos": position,
-                "ang": angle,
-                "valance_1": valance_1,
-                "valance_2": valance_2,
-            },
-        )
+        msg_params = {
+            "pos": position,
+            "ang": angle,
+            "valance_1": valance_1,
+            "valance_2": valance_2,
+        }
+        # Encode the angle with this motor's real range when known (e.g. a
+        # slat roof's -45..+90), so outgoing commands land on the same
+        # physical angle that incoming readings are decoded to - see issue #7.
+        if blind.min_angle is not None:
+            msg_params["min_angle"] = blind.min_angle
+        if blind.max_angle is not None:
+            msg_params["max_angle"] = blind.max_angle
+        msg = WmsMessage("blindMoveToPos", blind.snr, msg_params)
         msg.on_end = _on_complete
         self._enqueue(msg, priority=True)
         threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
@@ -727,6 +747,9 @@ class WmsStick:
             )
             return None
 
+        if has_slat_roof_param_layout(blind.product_type):
+            return self._read_slat_roof_angle_range(blind, timeout)
+
         if not has_standard_param_layout(blind.product_type):
             _LOGGER.debug(
                 "WmsStick: read_motor_parameters: skipping %s, product type %s "
@@ -883,6 +906,80 @@ class WmsStick:
             params.absent_position,
             params.absent_angle,
             params.comfort_auto_enabled,
+        )
+        return params
+
+    def _read_slat_roof_angle_range(
+        self, blind: "Blind", timeout: float
+    ) -> Optional[MotorParameters]:
+        """Read the tilt-angle range (productSettings.minAngle/maxAngle) for a
+        slat-roof motor (Lamellendach).
+
+        Slat-roof motors lay out block 38 differently from the standard
+        actuator layout: there is no position axis, so productSettings is
+        much shorter and minAngle/maxAngle sit at addresses 463/464 instead
+        of 472/473 - verified against WMS Studio Pro's own decrypted PLists
+        (issue #7). The other fields (run/calibration times, tilting steps,
+        motor rotation) either don't exist for this product or aren't needed
+        for tilt scaling, so only the two angle bytes are read.
+
+        Also updates ``blind.min_angle``/``blind.max_angle`` directly so the
+        live position-poll callback can scale ``angle_raw`` correctly without
+        a second round trip.
+        """
+        params = MotorParameters()
+        done = threading.Event()
+        result: dict = {"failed": False}
+
+        def on_complete(error, msg_sent, msg_rcv):
+            if error == "timeout" or msg_rcv is None:
+                result["failed"] = True
+            else:
+                data = msg_rcv["params"].get("data", b"")
+                if len(data) >= 2:
+                    params.min_angle = product_angle_from_byte(data[0])
+                    params.max_angle = product_angle_from_byte(data[1])
+            done.set()
+
+        self.mb8_read(
+            blind.snr_hex,
+            block=MOTOR_PARAM_BLOCK,
+            addr=ADDR_SLAT_ROOF_MIN_ANGLE,
+            size=2,
+            on_complete=on_complete,
+        )
+
+        if not done.wait(timeout) or result["failed"]:
+            _LOGGER.warning(
+                "WmsStick: _read_slat_roof_angle_range: read failed for %s",
+                blind.snr_hex,
+            )
+            return None
+
+        # A degenerate range (equal or reversed bounds) would make every
+        # angle scaling divide by zero / go backwards. Leave blind.min_angle/
+        # max_angle at None (default -75..+75) rather than adopting a bad
+        # read - a misread device should fall back, not break tilt scaling.
+        if (
+            params.min_angle is not None
+            and params.max_angle is not None
+            and params.min_angle < params.max_angle
+        ):
+            blind.min_angle = params.min_angle
+            blind.max_angle = params.max_angle
+        else:
+            _LOGGER.warning(
+                "WmsStick: _read_slat_roof_angle_range: implausible range for "
+                "%s (min=%s max=%s), keeping default",
+                blind.snr_hex,
+                params.min_angle,
+                params.max_angle,
+            )
+        _LOGGER.info(
+            "WmsStick: slat-roof angle range for %s: min=%s max=%s",
+            blind.snr_hex,
+            params.min_angle,
+            params.max_angle,
         )
         return params
 
@@ -1437,6 +1534,32 @@ class WmsStick:
     # -----------------------------------------------------------------------
     # Internal helpers
     # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _rescale_angle(blind: Blind, params: dict) -> Optional[int]:
+        """Re-scale a decoded position frame's angle to this motor's real range.
+
+        ``decode_frame()`` has no knowledge of the motor's product type, so it
+        scales ``angle_raw`` with the default (venetian-blind) -75..+75 range.
+        Once the motor's real range is known (``blind.min_angle``/``max_angle``,
+        read via ``_read_slat_roof_angle_range`` for slat roofs), re-derive the
+        percentage from the raw byte with that range instead - see issue #7.
+
+        Returns ``None`` unchanged (angle not available, e.g. blind raised).
+        """
+        angle = params.get("angle")
+        if angle is None:
+            return None
+        if blind.min_angle is None or blind.max_angle is None:
+            return angle
+        angle_raw = params.get("angle_raw")
+        if angle_raw is None:
+            return angle
+        return angle_hex_to_percent(
+            format(angle_raw, "02X"),
+            min_angle=blind.min_angle,
+            max_angle=blind.max_angle,
+        )
 
     def _get_blind(self, blind_id) -> Optional[Blind]:
         """Find a blind by snr (int), snr_hex (str), or name (str)."""
