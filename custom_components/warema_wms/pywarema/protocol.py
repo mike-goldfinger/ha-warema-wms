@@ -263,10 +263,16 @@ ADDR_MAX_ANGLE = 473  # productSettings.maxAngle
 ADDR_TILTING_STEPS = 474  # productSettings.tiltingSteps
 ADDR_MOTOR_ROTATION = 475  # productSettings.motorRotation (0=normal, 1=reversed)
 
-# Block 81: firmware / hardware info (read-only)
+# Block 81: firmware / hardware info (read-only).
+#
+# Verified against WMS Studio Pro's own read (ReadDeviceMetaDataConvBlock81Conv):
+# it reads 32 bytes starting at address 24, with the device-type byte at
+# offset 19 within that buffer and the software version as an 11-char Latin1
+# string at offset 0.
 SW_INFO_BLOCK = 81
-SW_INFO_ADDR = 0
+SW_INFO_ADDR = 24
 SW_INFO_SIZE = 32
+SW_INFO_DEVICE_TYPE_OFFSET = 19
 
 
 def manual_position_to_byte(pct: int) -> int:

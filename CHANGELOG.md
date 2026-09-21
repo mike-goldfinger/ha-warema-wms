@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+- **Add a device by serial number.** Some actuators (e.g. the integrated
+  lighting on a Lamaxa slat roof) are only ever paired to a handheld
+  Wandsender and never join the WMS network on their own, so a broadcast scan
+  never finds them. The options menu now offers "Add a device by serial
+  number", which reads the device directly (product type, device type,
+  firmware version) once its serial number is known - no re-pairing or
+  Wandsender handshake required. See issue #8.
+- **Per-device key/transmission mode.** Until now every unicast frame was sent
+  with the factory key (`R06`). Radio motors answer that, but WMS Studio Pro
+  addresses networked devices with the network key (`R11`), and some actuators
+  - apparently including dimmers - answer nothing else. "Add a device by
+  serial number" now probes `R11`, `R16`, `R01` and `R06`, stores the mode the
+  device answers on, and uses it for all later commands to that device. If a
+  device only answers on the broadcast PAN (`FFFF`), it never joined the
+  network; this is logged but the device cannot be added. See issue #8.
+
 ### Fixed
 - **Device discovery can now start from an idle command queue.** Starting a
   network scan enqueued its three scan requests but did not wake the USB-stick
@@ -13,6 +30,10 @@ All notable changes to this project will be documented in this file.
   firmware parameters requires several serial requests per motor. These reads
   now continue in the background after the covers are available, avoiding long
   startup delays when a receiver is slow or temporarily unreachable.
+- **Block 81 (firmware/device-type) read used the wrong address.** The
+  "Softwareversion" and "Gerätetyp" diagnostic sensors read raw placeholder
+  bytes instead of the actual values. The correct address and byte offsets
+  were verified against WMS Studio Pro's own read of this block.
 
 ## [1.8.0] - 2026-08-26
 

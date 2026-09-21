@@ -97,6 +97,11 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
         self._init_event = asyncio.Event()
         self._scan_event = asyncio.Event()
         self._scanned_devices: list[dict] = []
+        # Serializes async_scan_devices() and async_probe_device_by_serial():
+        # both add/remove entries in the stick's blind registry, and a
+        # broadcast rescan replaces that registry wholesale, so the two must
+        # not run concurrently.
+        self._discovery_lock = asyncio.Lock()
         # Initialize empty data dict (filled by _wms_callback)
         self.data: dict[int, BlindState] = {}
         # Latest weather broadcast per station SNR (filled by _wms_callback).
@@ -160,6 +165,7 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
                 # If absent (config from old version), it will be filled in
                 # lazily after init via _enrich_product_info().
                 if blind is not None:
+                    blind.radio_mode = device.get("radio_mode", blind.radio_mode)
                     pt = device.get("product_type")
                     if pt is not None:
                         blind.product_type = pt
@@ -353,18 +359,89 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
         if not self.stick:
             return []
 
-        self._scan_event.clear()
-        self._scanned_devices = []
+        async with self._discovery_lock:
+            self._scan_event.clear()
+            self._scanned_devices = []
 
-        await self.hass.async_add_executor_job(self.stick.scan_devices, auto_assign)
+            await self.hass.async_add_executor_job(self.stick.scan_devices, auto_assign)
 
-        # Wait for scan to complete (up to 10 seconds)
-        try:
-            await asyncio.wait_for(self._scan_event.wait(), timeout=10.0)
-        except asyncio.TimeoutError:
-            _LOGGER.warning("WaremaCoordinator: Device scan timed out")
+            # Wait for scan to complete (up to 10 seconds)
+            try:
+                await asyncio.wait_for(self._scan_event.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                _LOGGER.warning("WaremaCoordinator: Device scan timed out")
 
-        return self._scanned_devices
+            return self._scanned_devices
+
+    async def async_probe_device_by_serial(self, snr: int) -> dict | None:
+        """Identify a device by serial number without a broadcast scan.
+
+        Some actuators never answer ``scanRequest`` on their own (observed on
+        Warema Lamaxa slat-roof lighting, see issue #8): they were only ever
+        paired to a handheld Wandsender and don't join the WMS network
+        independently. Such a device is still reachable directly once its
+        serial number is known (e.g. from WMS Studio Pro or its label), via
+        the same unicast reads used for product-type / firmware diagnostics.
+
+        Returns a scan-result-shaped dict (``snr``, ``snr_hex``, ``device_type``,
+        ``device_type_str``, ``product_type``, ``is_with_blinds``) on success,
+        or ``None`` if the device does not answer either read.
+
+        The probe registers a temporary blind on the stick to perform the
+        reads and removes it again before returning - the caller decides
+        whether to actually add the device via the normal select_devices flow.
+        """
+        if not self.stick:
+            return None
+
+        async with self._discovery_lock:
+            # blind_add() returns the existing Blind instead of duplicating it
+            # if this SNR is already registered (e.g. a device added earlier
+            # in this session). Only remove it again in that case if we are
+            # the ones who created it - never tear down a blind that was
+            # already there.
+            already_registered = any(b.snr == snr for b in self.stick.get_blinds())
+            probe_name = f"probe-{snr}"
+            blind = await self.hass.async_add_executor_job(
+                self.stick.blind_add, snr, probe_name
+            )
+            try:
+                radio_mode, pan_id = await self.hass.async_add_executor_job(
+                    self.stick.probe_radio_mode, snr
+                )
+                if radio_mode is None or pan_id != self.stick.pan_id:
+                    return None
+                sw_ver, dev_type_hex = await self.hass.async_add_executor_job(
+                    self.stick.read_block81_info, snr
+                )
+                if dev_type_hex is None:
+                    return None
+                device_type = dev_type_hex.removeprefix("0x").upper().zfill(2)
+
+                product_info = await self.hass.async_add_executor_job(
+                    self.stick.read_product_info, snr
+                )
+                product_type, is_with_blinds = (
+                    product_info if product_info is not None else (None, None)
+                )
+
+                from .pywarema.device_types import device_type_name
+                from .pywarema.protocol import product_type_name
+
+                return {
+                    "snr": snr,
+                    "snr_hex": blind.snr_hex,
+                    "device_type": device_type,
+                    "device_type_str": device_type_name(device_type),
+                    "product_type": product_type,
+                    "product_type_str": product_type_name(product_type),
+                    "is_with_blinds": is_with_blinds,
+                    "software_version": sw_ver,
+                    "radio_mode": radio_mode,
+                }
+            finally:
+                if not already_registered:
+                    await self.hass.async_add_executor_job(self.stick.blind_remove, snr)
 
     def add_blind(self, snr: int, name: str) -> None:
         """Add a blind to the stick."""
