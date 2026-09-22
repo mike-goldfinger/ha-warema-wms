@@ -93,6 +93,16 @@ CMD_SETTINGS = {
     "waveRequest": {"timeout": 0.500, "delay_after": 0.300, "retry": -1},
     "scanRequest": {"timeout": 0.750, "delay_after": 0.000, "retry": -1},
 }
+
+# blindMoveToPos retries used for tilt-only motors (slat roofs), which have no
+# position axis and, per issue #7's logs, go back to sleep noticeably more
+# eagerly than the geared actuators the default retry count was tuned for -
+# a get-position poll on one has timed out mere seconds after it stopped
+# moving. The default 4 attempts (retry=3) at 0.5 s only cover ~2 s, too
+# short a window to catch such a motor waking back up; this raises it to
+# ~5 s, matching the wake+control time budget WMS Studio Pro's own protocol
+# allots a single command - see issue #7.
+SLAT_ROOF_MOVE_RETRY = 9
 DEFAULT_TIMEOUT = 2.0
 DEFAULT_RETRY = -1  # -1 = no retry
 
@@ -569,6 +579,14 @@ class WmsStick:
             msg_params["max_angle"] = blind.max_angle
         msg = WmsMessage("blindMoveToPos", blind.snr, msg_params)
         msg.on_end = _on_complete
+        if has_slat_roof_param_layout(blind.product_type):
+            msg.retry = SLAT_ROOF_MOVE_RETRY
+        # Drop any blindMoveToPos still queued/retrying for this blind before
+        # adding the new target: without this, clicking the tilt slider again
+        # while the motor hasn't answered the previous command yet (e.g. it
+        # went back to sleep) piles up multiple, sometimes contradictory,
+        # targets that then fire one after another - see issue #7.
+        self._remove_queued_msgs(cmd="blindMoveToPos", snr_hex=blind.snr_hex)
         self._enqueue(msg, priority=True)
         threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
 
