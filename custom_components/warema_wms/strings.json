@@ -3,7 +3,7 @@
     "step": {
       "serial_port": {
         "title": "Warema WMS – Serial Port",
-        "description": "The integration automatically searches for connected Warema WMS USB Sticks (FTDI FT232R devices).\n\nFound devices:\n{devices_list}\n\nIf your device is not listed or no devices were found, you can enter the path manually.\n\nExamples:\n- Linux: `/dev/ttyUSB0` or `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_…`\n- Windows: `COM5`",
+        "description": "The integration automatically searches for connected Warema WMS USB Sticks (FTDI FT232R devices).\n\nFound devices:\n{devices_list}\n\nIf your device is not listed or no devices were found, you can enter the path manually.\n\nExamples:\n- Linux: `/dev/ttyUSB0` or `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_…` or `socket://192.168.1.2:8638`\n- Windows: `COM5`",
         "data": {
           "serial_port": "Serial Port"
         },

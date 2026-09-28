@@ -145,7 +145,7 @@ def _init_stick_probe(port: str, channel: int, pan_id: str, key: str) -> serial.
     Returns the open serial.Serial object.
     Raises serial.SerialException on failure.
     """
-    ser = serial.Serial(
+    ser = serial.serial_for_url(
         port=port,
         baudrate=125000,
         bytesize=serial.EIGHTBITS,
