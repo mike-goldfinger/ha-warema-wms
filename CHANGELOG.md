@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.
   dangling link has been dropped; devices are unaffected. (issue #14)
 
 ### Added
+- **Device type `30` (plug receiver, newer generation) is now supported.**
+  It answers the network scan like the known plug receiver (`21`) and is
+  handled the same way, so awnings and sun sails driven by it show up as
+  cover entities instead of being skipped as `<unknown>`. (issue #18)
 - **Weather station battery sensor.** The weather broadcast carries the
   station's battery level (half-percent steps); it is now exposed as a
   diagnostic `sensor` entity. (issue #17)

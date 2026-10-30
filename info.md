@@ -25,7 +25,7 @@ Slat tilt is enabled automatically for products with slats (Raffstoren, Venetian
 
 - **Warema WMS USB Stick** (FTDI FT232R, USB VID `0403` / PID `6001`)
 - Home Assistant **2023.1.0** or later
-- Supported cover actuator types: **20** (Actuator UP), **21** (Plug receiver), **25** (Radio motor), **2A** (Radio motor Lamellendach), **2E** (Actuator 230V UP)
+- Supported cover actuator types: **20** (Actuator UP), **21** (Plug receiver), **25** (Radio motor), **2A** (Radio motor Lamellendach), **2E** (Actuator 230V UP), **30** (Plug receiver, newer generation)
 - Supported dimming actuator types (light entities): **26** (Dimmer), **28** (Dimmer smart), **31** (Dimmer 0-10 V)
 
 ---
