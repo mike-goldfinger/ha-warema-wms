@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Fixed
+- **Hassfest validation passes again.** `pyserial` is bundled with Home
+  Assistant itself and recent Hassfest rules reject it in a custom
+  integration's manifest. The explicit requirement has been removed; the
+  integration keeps using the pyserial shipped with Home Assistant.
 - **Device discovery can now start from an idle command queue.** Starting a
   network scan enqueued its three scan requests but did not wake the USB-stick
   queue processor. If no other WMS command followed, Home Assistant waited for
