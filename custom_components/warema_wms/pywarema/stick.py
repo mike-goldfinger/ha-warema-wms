@@ -234,10 +234,11 @@ class WmsStick:
         self._weather = {
             "snr": 0,
             "snr_hex": "000000",
-            "temp": 0,
-            "wind": 0,
+            "temp": None,
+            "wind": None,
             "lumen": 0,
-            "rain": False,
+            "rain": None,
+            "battery": None,
         }
 
         # Position update polling
@@ -1795,10 +1796,11 @@ class WmsStick:
                 {
                     "snr": msg["snr_num"],
                     "snr_hex": snr,
-                    "temp": params.get("temp", 0),
-                    "wind": params.get("wind", 0),
+                    "temp": params.get("temp"),
+                    "wind": params.get("wind"),
                     "lumen": params.get("lumen", 0),
-                    "rain": params.get("rain", False),
+                    "rain": params.get("rain"),
+                    "battery": params.get("battery"),
                 }
             )
             _LOGGER.debug("WmsStick: Weather: %s", self._weather)

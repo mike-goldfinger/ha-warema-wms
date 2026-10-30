@@ -19,6 +19,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     LIGHT_LUX,
+    PERCENTAGE,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UnitOfSpeed,
@@ -76,6 +77,13 @@ _WEATHER_SENSOR_DEFS = [
         LIGHT_LUX,
         SensorDeviceClass.ILLUMINANCE,
         "mdi:white-balance-sunny",
+    ),
+    (
+        "battery",
+        "weather_battery",
+        PERCENTAGE,
+        SensorDeviceClass.BATTERY,
+        None,  # let HA pick the level-dependent battery icon
     ),
 ]
 
@@ -332,7 +340,7 @@ class WaremaWeatherSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         translation_key: str,
         unit: str,
         device_class: SensorDeviceClass,
-        icon: str,
+        icon: str | None,
     ) -> None:
         super().__init__(coordinator, context=snr)
         self._snr = snr
@@ -344,6 +352,8 @@ class WaremaWeatherSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         self._attr_device_class = device_class
         self._attr_icon = icon
         self._attr_unique_id = f"{DOMAIN}_weather_{snr}_{attr}"
+        if device_class is SensorDeviceClass.BATTERY:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def _get_state(self):
         return self.coordinator.weather_data.get(self._snr)
@@ -363,7 +373,11 @@ class WaremaWeatherSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
 
     @property
     def available(self) -> bool:
-        return self._get_state() is not None
+        # A field that decodes to None means the station has no such sensor
+        # (0xFF on the wire). Show the entity as unavailable instead of a
+        # bogus reading such as 92.5 °C (issue #17).
+        state = self._get_state()
+        return state is not None and getattr(state, self._field) is not None
 
     @property
     def native_value(self) -> float | int | None:

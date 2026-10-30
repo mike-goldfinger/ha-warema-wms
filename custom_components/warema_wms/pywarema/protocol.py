@@ -552,6 +552,18 @@ def _wms_trim(data: str) -> str:
     return data.strip()
 
 
+def _weather_half_steps(hex_byte: str) -> Optional[float]:
+    """Decode a weather-broadcast byte that counts in half steps.
+
+    Returns ``raw / 2`` or ``None`` when the byte is ``FF`` (sensor not
+    present) or missing.
+    """
+    hex_byte = hex_byte.upper()
+    if len(hex_byte) != 2 or hex_byte == "FF":
+        return None
+    return int(hex_byte, 16) / 2
+
+
 def decode_frame(raw: str) -> dict:
     """Decode a received WMS frame string into a message dict.
 
@@ -671,8 +683,9 @@ def decode_frame(raw: str) -> dict:
             # Weather broadcast
             msg_type = "weatherBroadcast"
             params["unknown_1"] = payload[0:2]
-            wind_raw = int(payload[2:4], 16)
-            params["wind"] = wind_raw
+            # Byte 1: wind speed in 0.5 m/s steps (matches WMS Studio, issue #17).
+            # 0xFF = no wind sensor.
+            params["wind"] = _weather_half_steps(payload[2:4])
             lumen_hi = payload[4:6]
             lumen_lo = int(payload[12:14], 16)
             if lumen_hi == "00":
@@ -680,9 +693,18 @@ def decode_frame(raw: str) -> dict:
             else:
                 params["lumen"] = int(lumen_hi, 16) * lumen_lo * 2
             params["unknown_2"] = payload[6:12]
-            params["unknown_3"] = payload[14:16]
-            params["rain"] = payload[16:18] == "C8"
-            params["temp"] = int(payload[18:20], 16) / 2 - 35
+            # Byte 7: battery level in half-percent steps (0xC8 = 100 %,
+            # 0xC0 = 96 %). Verified against the values WMS Studio shows
+            # for the same frames (issue #17).
+            params["battery"] = _weather_half_steps(payload[14:16])
+            # Byte 8: rain flag. 0xFF = station has no rain sensor.
+            rain_raw = payload[16:18].upper()
+            params["rain"] = None if rain_raw in ("FF", "") else rain_raw == "C8"
+            # Byte 9: temperature, 0.5 °C steps with -35 °C offset.
+            # 0xFF = station has no temperature sensor (e.g. Wetterstation eco),
+            # previously decoded as a bogus 92.5 °C (issue #17).
+            temp_raw = _weather_half_steps(payload[18:20])
+            params["temp"] = None if temp_raw is None else temp_raw - 35
             params["unknown_4"] = payload[20:]
 
         elif rcv_type == "8020":

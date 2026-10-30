@@ -171,7 +171,9 @@ class WaremaWeatherRainSensor(CoordinatorEntity[WaremaCoordinator], BinarySensor
 
     @property
     def available(self) -> bool:
-        return self._get_state() is not None
+        # rain is None when the station has no rain sensor (issue #17).
+        state = self._get_state()
+        return state is not None and state.rain is not None
 
     @property
     def is_on(self) -> bool | None:
