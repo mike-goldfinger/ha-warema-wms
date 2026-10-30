@@ -1271,6 +1271,7 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
             return self.async_abort(reason="not_loaded")
 
         errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {}
         if user_input is not None:
             snr = user_input["serial_number"]
             existing_snrs = {
@@ -1289,6 +1290,29 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
                 if probed is None:
                     errors["base"] = "device_not_responding"
                 elif probed.get("device_type", "") not in SUPPORTED_DEVICE_TYPES:
+                    # The device is reachable, we just don't know what it is.
+                    # Surface everything the probe learned, in the form and in
+                    # the log, so the user can report it without DEBUG logging.
+                    placeholders = {
+                        "device_type": str(probed.get("device_type") or "?"),
+                        "product_type": str(
+                            probed.get("product_type_str")
+                            or probed.get("product_type")
+                            or "?"
+                        ),
+                        "software_version": str(probed.get("software_version") or "?"),
+                        "radio_mode": str(probed.get("radio_mode") or "?"),
+                    }
+                    _LOGGER.warning(
+                        "Device %s answered the serial-number probe but its device "
+                        "type %s is not supported yet (product type %s, firmware %s, "
+                        "radio mode %s). Please report these values in a GitHub issue.",
+                        snr,
+                        placeholders["device_type"],
+                        placeholders["product_type"],
+                        placeholders["software_version"],
+                        placeholders["radio_mode"],
+                    )
                     errors["base"] = "device_type_unsupported"
                 else:
                     self._discovered_devices = [probed]
@@ -1304,6 +1328,7 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
                 }
             ),
             errors=errors,
+            description_placeholders=placeholders,
         )
 
     # ------------------------------------------------------------------
