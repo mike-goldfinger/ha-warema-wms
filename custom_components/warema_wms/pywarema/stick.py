@@ -202,7 +202,7 @@ class WmsStick:
         """Initialize the WMS Stick.
 
         Args:
-            port: Serial port path (e.g. '/dev/ttyUSB1')
+            port: Serial port path (e.g. '/dev/ttyUSB1' or 'socket://192.168.1.2:8638')
             channel: WMS network channel (e.g. 17)
             pan_id: WMS network PAN ID (4-char hex, e.g. 'ABCD')
             key: WMS network key (32-char hex)
@@ -262,14 +262,17 @@ class WmsStick:
         Raises serial.SerialException on failure.
         """
         _LOGGER.info("WmsStick: Connecting to %s", self.port_path)
-        self._serial = serial.Serial(
-            port=self.port_path,
-            baudrate=125000,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=0.1,
-        )
+        if self.port_path.startswith("socket://"):
+          self._serial = serial.serial_for_url(self.port_path, timeout=2)
+        else:
+          self._serial = serial.Serial(
+              port=self.port_path,
+              baudrate=125000,
+              bytesize=serial.EIGHTBITS,
+              parity=serial.PARITY_NONE,
+              stopbits=serial.STOPBITS_ONE,
+              timeout=0.1,
+          )
         self.status = "init"
 
         self._stop_event.clear()
@@ -1665,14 +1668,17 @@ class WmsStick:
                     time.sleep(retry_delay)
 
                 # Reopen the port
-                self._serial = serial.Serial(
-                    port=self.port_path,
-                    baudrate=125000,
-                    bytesize=serial.EIGHTBITS,
-                    parity=serial.PARITY_NONE,
-                    stopbits=serial.STOPBITS_ONE,
-                    timeout=0.1,
-                )
+                if self.port_path.startswith("socket://"):
+                    self._serial = serial.serial_for_url(self.port_path, timeout=2)
+                else:
+                    self._serial = serial.Serial(
+                        port=self.port_path,
+                        baudrate=125000,
+                        bytesize=serial.EIGHTBITS,
+                        parity=serial.PARITY_NONE,
+                        stopbits=serial.STOPBITS_ONE,
+                        timeout=0.1,
+                    )
 
                 _LOGGER.info(
                     "WmsStick: Successfully reconnected to %s on attempt %d",

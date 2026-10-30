@@ -145,14 +145,17 @@ def _init_stick_probe(port: str, channel: int, pan_id: str, key: str) -> serial.
     Returns the open serial.Serial object.
     Raises serial.SerialException on failure.
     """
-    ser = serial.Serial(
-        port=port,
-        baudrate=125000,
-        bytesize=serial.EIGHTBITS,
-        parity=serial.PARITY_NONE,
-        stopbits=serial.STOPBITS_ONE,
-        timeout=0.1,
-    )
+    if port.startswith("socket://"):
+        ser = serial.serial_for_url(port, timeout=2)
+    else:
+        ser = serial.Serial(
+            port=port,
+            baudrate=125000,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=0.1,
+        )
     import time
 
     time.sleep(0.2)

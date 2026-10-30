@@ -39,6 +39,10 @@ All notable changes to this project will be documented in this file.
   now continue in the background after the covers are available, avoiding long
   startup delays when a receiver is slow or temporarily unreachable.
 
+### Added
+- **Support for serial ports via sockets.** It is now possible to connect to a
+  WMS stick that is exposed to the network via `ser2net` or similar solutions.
+
 ## [1.8.0] - 2026-08-26
 
 ### Added
