@@ -85,7 +85,6 @@ class WaremaIdentifyButton(ButtonEntity):
             name=f"{self._device_type_str} {self._snr}",
             manufacturer="Warema",
             model=self._device_type_str,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     async def async_press(self) -> None:

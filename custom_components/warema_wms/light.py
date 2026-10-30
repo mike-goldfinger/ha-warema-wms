@@ -137,7 +137,6 @@ class WaremaLight(CoordinatorEntity[WaremaCoordinator], LightEntity):
             name=self._attr_name,
             manufacturer="Warema",
             model=model,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property

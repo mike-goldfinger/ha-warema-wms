@@ -123,7 +123,6 @@ class WaremaWmsMovingSensor(CoordinatorEntity[WaremaCoordinator], BinarySensorEn
             name=f"{self._device_type_str} {self._snr}",
             manufacturer="Warema",
             model=self._device_type_str,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -165,7 +164,6 @@ class WaremaWeatherRainSensor(CoordinatorEntity[WaremaCoordinator], BinarySensor
             name=f"Weather station {self._snr}",
             manufacturer="Warema",
             model="Weather station",
-            via_device=(DOMAIN, self._entry_id),
             serial_number=snr_hex or None,
         )
 

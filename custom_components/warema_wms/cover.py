@@ -361,7 +361,6 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
             name=self._attr_name,
             manufacturer="Warema",
             model=model,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -703,7 +702,6 @@ class WaremaValanceCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
             name=self._device_name,
             manufacturer="Warema",
             model=model,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property

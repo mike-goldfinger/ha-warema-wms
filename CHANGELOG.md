@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+- **No more `via_device` deprecation warning.** Every entity linked its device
+  to a hub device that this integration never registers, which Home Assistant
+  2026.8+ reports as a deprecated `via_device` call (removal in 2027.8). The
+  dangling link has been dropped; devices are unaffected. (issue #14)
+
 ### Added
 - **Weather station battery sensor.** The weather broadcast carries the
   station's battery level (half-percent steps); it is now exposed as a
