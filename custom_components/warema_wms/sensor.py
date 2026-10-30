@@ -276,7 +276,6 @@ class WaremaWmsSensor(
             name=f"{self._device_type_str} {self._snr}",
             manufacturer="Warema",
             model=self._device_type_str,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -316,7 +315,6 @@ class WaremaSnrSensor(SensorEntity):
             name=f"{self._device_type_str} {self._snr}",
             manufacturer="Warema",
             model=self._device_type_str,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -367,7 +365,6 @@ class WaremaWeatherSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
             name=f"Weather station {self._snr}",
             manufacturer="Warema",
             model="Weather station",
-            via_device=(DOMAIN, self._entry_id),
             serial_number=snr_hex or None,
         )
 
@@ -421,7 +418,6 @@ class WaremaMotorInfoSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
             identifiers={(DOMAIN, self._snr_hex)},
             name=self._device_type_str,
             manufacturer="Warema",
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -473,7 +469,6 @@ class WaremaProductTypeSensor(SensorEntity):
             identifiers={(DOMAIN, self._snr_hex)},
             name=self._device_type_str,
             manufacturer="Warema",
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -531,7 +526,6 @@ class WaremaValanceSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
             identifiers={(DOMAIN, self._snr_hex)},
             name=self._device_type_str,
             manufacturer="Warema",
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
