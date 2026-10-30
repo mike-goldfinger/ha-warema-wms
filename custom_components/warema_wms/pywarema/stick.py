@@ -88,7 +88,7 @@ CMD_SETTINGS = {
     "blindStopMove": {"timeout": 0.200, "delay_after": 0.005, "retry": 3},
     "waveRequest": {"timeout": 0.500, "delay_after": 0.300, "retry": -1},
     "scanRequest": {"timeout": 0.750, "delay_after": 0.000, "retry": -1},
-    # Stick-side link measurement; WMS Studio uses 500 ms and 3 retries.
+    # Stick-side link measurement: short answer window, a few retries.
     "connectionQuality": {"timeout": 0.500, "delay_after": 0.100, "retry": 3},
 }
 DEFAULT_TIMEOUT = 2.0
