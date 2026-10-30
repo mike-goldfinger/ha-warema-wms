@@ -56,13 +56,16 @@ from .pywarema.device_types import (  # noqa: F401  (re-export)
     BLIND_DEVICE_TYPES,
     COVER_DEVICE_TYPES,
     DEVICE_TYPE_STRINGS,
+    LIGHT_DEVICE_TYPES,
     LIGHT_DIMMER_DEVICE_TYPES,
+    LIGHT_SWITCH_DEVICE_TYPES,
     SUPPORTED_DEVICE_TYPES,
     TILT_DEVICE_TYPES,
     device_type_name,
     is_cover_device,
     is_light_device,
     is_supported_device,
+    is_switch_light_device,
     platform_for_device_type,
 )
 
