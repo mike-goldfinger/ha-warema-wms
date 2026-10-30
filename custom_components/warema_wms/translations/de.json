@@ -151,13 +151,18 @@
       "weather_battery": { "name": "Batterie" },
       "valance_1": { "name": "Volant 1" },
       "valance_2": { "name": "Volant 2" },
-      "product_type": { "name": "Produkttyp" }
+      "product_type": { "name": "Produkttyp" },
+      "connection_tx_lqi": { "name": "Linkqualität (zum Gerät)" },
+      "connection_tx_rssi": { "name": "Signalstärke (zum Gerät)" },
+      "connection_rx_lqi": { "name": "Linkqualität (vom Gerät)" },
+      "connection_rx_rssi": { "name": "Signalstärke (vom Gerät)" }
     },
     "binary_sensor": {
       "weather_rain": { "name": "Regen" }
     },
     "button": {
-      "identify": { "name": "Identifizieren" }
+      "identify": { "name": "Identifizieren" },
+      "measure_connection_quality": { "name": "Verbindungsqualität messen" }
     }
   }
 }

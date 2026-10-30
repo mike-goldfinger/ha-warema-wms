@@ -20,6 +20,12 @@ All notable changes to this project will be documented in this file.
   device answers on, and uses it for all later commands to that device. If a
   device only answers on the broadcast PAN (`FFFF`), it never joined the
   network; this is logged but the device cannot be added. See issue #8.
+- **Measure connection quality.** Every device gets a diagnostic button that
+  asks the USB stick to probe the radio link to that device, plus four
+  diagnostic sensors with the result: link quality and signal strength in
+  each direction (stick to device, device to stick), as raw values reported
+  by the stick. Useful to tell an out-of-range receiver from a protocol
+  problem. (issue #16)
 - **Device type `30` (plug receiver, newer generation) is now supported.**
   It answers the network scan like the known plug receiver (`21`) and is
   handled the same way, so awnings and sun sails driven by it show up as

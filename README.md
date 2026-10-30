@@ -28,6 +28,7 @@
 - 📊 **Real-time monitoring** — Position, angle, and motion detection sensors
 - 🌦️ **Weather station support** — Temperature, wind, brightness and rain sensors, auto-discovered from WMS weather-station broadcasts
 - 🔦 **Identify button** — Briefly waves a blind so you can match an entity to the physical device
+- 📶 **Connection quality** — A button per device asks the stick to measure the radio link; link quality and signal strength for both directions show up as diagnostic sensors
 - 🔌 **USB auto-detection** — Plug in your Warema WMS Stick and go
 - ⚙️ **Easy setup wizard** — Multiple discovery methods (manual, Wandsender pairing, new network)
 - 🌍 **Multiple device support** — Works with Type 20, 21, 25, 2A and 2E cover actuators plus Type 26, 28 and 31 dimmers
@@ -231,6 +232,13 @@ device:
 ### Button Entities
 - **Identify** — Sends a wave/beckon so the blind briefly moves, to help you
   match the entity to the physical device
+- **Measure connection quality** — Asks the USB stick to probe the radio
+  link to this device. The result fills four diagnostic sensors: *Link
+  quality* and *Signal strength*, each for the stick → device and the
+  device → stick direction. The numbers are the raw values the stick
+  reports (higher is better); compare them between devices rather than
+  reading them as absolute dBm. A device that never answers the probe is out
+  of radio range of the stick.
 
 ### Light Entities
 

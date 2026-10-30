@@ -55,6 +55,16 @@ _MOTOR_INFO_SENSOR_DEFS = [
     ("device_type_name", "Gerätetyp", "mdi:cog"),
 ]
 
+# (attr, translation_key, icon) for the on-demand link measurement, filled by
+# the "Measure connection quality" button. Raw values as the stick reports
+# them; tx = stick -> device, rx = device -> stick.
+_CONNECTION_QUALITY_SENSOR_DEFS = [
+    ("tx_lqi", "connection_tx_lqi", "mdi:signal-cellular-2"),
+    ("tx_rssi", "connection_tx_rssi", "mdi:signal"),
+    ("rx_lqi", "connection_rx_lqi", "mdi:signal-cellular-2"),
+    ("rx_rssi", "connection_rx_rssi", "mdi:signal"),
+]
+
 # (attr, translation_key, unit, device_class, icon) for weather station readings.
 _WEATHER_SENSOR_DEFS = [
     (
@@ -119,6 +129,20 @@ async def async_setup_entry(
                 entry_id=entry.entry_id,
             )
         )
+
+        # Link measurement results - for every device the stick can address.
+        for attr, translation_key, icon in _CONNECTION_QUALITY_SENSOR_DEFS:
+            entities.append(
+                WaremaConnectionQualitySensor(
+                    coordinator=coordinator,
+                    snr=snr_int,
+                    snr_hex=snr_hex,
+                    device_type_str=device_type_str,
+                    attr=attr,
+                    translation_key=translation_key,
+                    icon=icon,
+                )
+            )
 
         # The remaining sensors describe a cover (position, angle, valances).
         if device_type not in COVER_DEVICE_TYPES:
@@ -430,6 +454,59 @@ class WaremaMotorInfoSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         if params is None:
             return None
         return getattr(params, self._attr_key, None)
+
+
+class WaremaConnectionQualitySensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
+    """Diagnostic sensor for one value of the last link measurement.
+
+    Unknown until the device's "Measure connection quality" button has been
+    pressed once; keeps the last result afterwards.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: WaremaCoordinator,
+        snr: int,
+        snr_hex: str,
+        device_type_str: str,
+        attr: str,
+        translation_key: str,
+        icon: str,
+    ) -> None:
+        super().__init__(coordinator, context=snr)
+        self._snr = snr
+        self._snr_hex = snr_hex
+        self._device_type_str = device_type_str
+        self._field = attr
+        self._attr_translation_key = translation_key
+        self._attr_icon = icon
+        self._attr_unique_id = f"{DOMAIN}_{snr_hex}_connection_{attr}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._snr_hex)},
+            name=self._device_type_str,
+            manufacturer="Warema",
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        result = self.coordinator.connection_quality.get(self._snr)
+        if result is None:
+            return None
+        return getattr(result, self._field)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        result = self.coordinator.connection_quality.get(self._snr)
+        if result is None:
+            return {}
+        return {"measured_at": result.measured_at}
 
 
 class WaremaProductTypeSensor(SensorEntity):

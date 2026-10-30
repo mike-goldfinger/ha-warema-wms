@@ -240,13 +240,18 @@
       "weather_battery": { "name": "Battery" },
       "valance_1": { "name": "Valance 1" },
       "valance_2": { "name": "Valance 2" },
-      "product_type": { "name": "Product type" }
+      "product_type": { "name": "Product type" },
+      "connection_tx_lqi": { "name": "Link quality (to device)" },
+      "connection_tx_rssi": { "name": "Signal strength (to device)" },
+      "connection_rx_lqi": { "name": "Link quality (from device)" },
+      "connection_rx_rssi": { "name": "Signal strength (from device)" }
     },
     "binary_sensor": {
       "weather_rain": { "name": "Rain" }
     },
     "button": {
-      "identify": { "name": "Identify" }
+      "identify": { "name": "Identify" },
+      "measure_connection_quality": { "name": "Measure connection quality" }
     }
   }
 }
