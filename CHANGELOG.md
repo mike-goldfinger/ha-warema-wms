@@ -4,13 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-### Fixed
-- **No more `via_device` deprecation warning.** Every entity linked its device
-  to a hub device that this integration never registers, which Home Assistant
-  2026.8+ reports as a deprecated `via_device` call (removal in 2027.8). The
-  dangling link has been dropped; devices are unaffected. (issue #14)
-
 ### Added
+- **Switching plug receivers (device type `24`) as on/off lights.** The WMS
+  Zwischenstecker that switches a light or socket reports device type `24`
+  and a switching product type (e.g. `16` LightSwitching). It is now accepted
+  by the scan and by "Add a device by serial number" and exposed as a light
+  entity without brightness: on sends level 100, off sends level 0, using the
+  same command the dimmers use. Plugs that were only ever paired to a handheld
+  remote never answer the scan; add them by serial number. (issue #1)
+- **Add a device by serial number.** Some actuators (e.g. the integrated
+  lighting on a Lamaxa slat roof) are only ever paired to a handheld
+  Wandsender and never join the WMS network on their own, so a broadcast scan
+  never finds them. The options menu now offers "Add a device by serial
+  number", which reads the device directly (product type, device type,
+  firmware version) once its serial number is known - no re-pairing or
+  Wandsender handshake required. See issue #8.
+- **Per-device key/transmission mode.** Until now every unicast frame was sent
+  with the factory key (`R06`). Radio motors answer that, but WMS Studio Pro
+  addresses networked devices with the network key (`R11`), and some actuators
+  - apparently including dimmers - answer nothing else. "Add a device by
+  serial number" now probes `R11`, `R16`, `R01` and `R06`, stores the mode the
+  device answers on, and uses it for all later commands to that device. If a
+  device only answers on the broadcast PAN (`FFFF`), it never joined the
+  network; this is logged but the device cannot be added. See issue #8.
 - **Measure connection quality.** Every device gets a diagnostic button that
   asks the USB stick to probe the radio link to that device, plus four
   diagnostic sensors with the result: link quality and signal strength in
@@ -26,16 +42,49 @@ All notable changes to this project will be documented in this file.
   diagnostic `sensor` entity. (issue #17)
 
 ### Fixed
+- **"Gerätetyp" and "Softwareversion" diagnostic sensors are now translated.**
+  Their names were hard-coded in German while every other entity follows the
+  Home Assistant language; they now read "Device type" / "Software version"
+  in English and keep their German names in a German UI. Entity IDs are
+  unchanged.
+- **"Add a device by serial number" now says what it found.** When a device
+  answers the probe but its type is unknown to the integration, the form and
+  a log warning now show the device type, product type, firmware and radio
+  mode, so the values can be reported without enabling DEBUG logging.
 - **Weather stations without a temperature or rain sensor no longer report
   92.5 °C.** `FF` in the weather broadcast means "sensor not present"
   (e.g. *Wetterstation eco*). The temperature, wind and rain entities now
   become *unavailable* instead of showing a bogus value. (issue #17)
 - **Wind speed was reported at twice the real value.** The broadcast counts
   in 0.5 m/s steps, matching what WMS Studio displays. (issue #17)
+- **No more `via_device` deprecation warning.** Every entity linked its device
+  to a hub device that this integration never registers, which Home Assistant
+  2026.8+ reports as a deprecated `via_device` call (removal in 2027.8). The
+  dangling link has been dropped; devices are unaffected. (issue #14)
 - **Hassfest validation passes again.** `pyserial` is bundled with Home
   Assistant itself and recent Hassfest rules reject it in a custom
   integration's manifest. The explicit requirement has been removed; the
   integration keeps using the pyserial shipped with Home Assistant.
+- **Slat-roof (Lamellendach) tilt now uses the motor's real angle range.**
+  The integration assumed every motor's slat angle spans a fixed ±75°. Slat
+  roofs (product types 27/28/29) actually span -45°..+90° - confirmed
+  against WMS Studio Pro and against hardware logs in issue #7 - so their
+  tilt position was read and commanded incorrectly (e.g. "fully open"
+  landing short of the real end stop). The range is now read from the motor
+  (Block 38) and used for both directions; it falls back to the previous
+  ±75° when unread or implausible.
+- **Slat-roof tilt no longer requires a known cover position.** These motors
+  have no position axis at all, so tilt commands were permanently blocked
+  waiting for a position that would never arrive. Tilt now works
+  independently of position; the motor frame's position byte is left
+  untouched instead of naming a value these actuators reject.
+- **Slat-roof motors get a longer command retry window, and a new target
+  replaces a pending one.** These motors go back to sleep quickly, so the
+  ~2 s retry budget of a move command often ran out before they woke up and
+  control went unresponsive for minutes. The budget is now ~5 s for slat
+  roofs. For every cover, a new position/tilt command now replaces a move
+  command for the same cover that is still waiting in the queue instead of
+  stacking up contradictory targets. (issue #7)
 - **Device discovery can now start from an idle command queue.** Starting a
   network scan enqueued its three scan requests but did not wake the USB-stick
   queue processor. If no other WMS command followed, Home Assistant waited for
@@ -44,7 +93,10 @@ All notable changes to this project will be documented in this file.
   firmware parameters requires several serial requests per motor. These reads
   now continue in the background after the covers are available, avoiding long
   startup delays when a receiver is slow or temporarily unreachable.
-
+- **Block 81 (firmware/device-type) read used the wrong address.** The
+  "Softwareversion" and "Gerätetyp" diagnostic sensors read raw placeholder
+  bytes instead of the actual values. The correct address and byte offsets
+  were verified against WMS Studio Pro's own read of this block.
 ## [1.8.0] - 2026-08-26
 
 ### Added

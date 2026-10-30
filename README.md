@@ -24,14 +24,14 @@
 
 - 🪟 **Full blind control** — Open, close, stop, set position and tilt angle
 - 🎪 **Valance control** — Awning valances as their own cover entities (open, close, stop, position)
-- 💡 **Light control** — WMS dimming actuators as dimmable light entities (brightness + on/off)
+- 💡 **Light control** — WMS dimming actuators as dimmable light entities (brightness + on/off), switching plug receivers as on/off lights
 - 📊 **Real-time monitoring** — Position, angle, and motion detection sensors
 - 🌦️ **Weather station support** — Temperature, wind, brightness and rain sensors, auto-discovered from WMS weather-station broadcasts
 - 🔦 **Identify button** — Briefly waves a blind so you can match an entity to the physical device
 - 📶 **Connection quality** — A button per device asks the stick to measure the radio link; link quality and signal strength for both directions show up as diagnostic sensors
 - 🔌 **USB auto-detection** — Plug in your Warema WMS Stick and go
 - ⚙️ **Easy setup wizard** — Multiple discovery methods (manual, Wandsender pairing, new network)
-- 🌍 **Multiple device support** — Works with Type 20, 21, 25, 2A and 2E cover actuators plus Type 26, 28 and 31 dimmers
+- 🌍 **Multiple device support** — Works with Type 20, 21, 25, 2A, 2E and 30 cover actuators, Type 26, 28 and 31 dimmers and Type 24 switching plug receivers
 - 🎯 **Native Home Assistant integration** — Full cover entity support with all features
 - 🐍 **Native Python integration** — Pure Python, no external bridge, add-on or MQTT broker required
 - 🔐 **Local control only** — No cloud dependency, all communication is local
@@ -114,7 +114,7 @@ Any motor reachable from one of these WMS actuators:
 | **2E** | Actuator 230V UP |
 | **30** | Plug receiver (newer generation) |
 
-### Dimming actuators (light entities)
+### Dimming and switching actuators (light entities)
 
 WMS dimming actuators are stand-alone devices with their own serial number —
 a light is never a sub-channel of a motor. They are discovered by the same
@@ -125,6 +125,16 @@ scan as the cover actuators and exposed as dimmable light entities:
 | **26** | Dimmer |
 | **28** | Dimmer (smart) |
 | **31** | Dimmer 0-10 V |
+
+The switching plug receiver (WMS Zwischenstecker for lights or sockets) has
+no intermediate levels and is exposed as an on/off light:
+
+| Type | Description |
+|------|-------------|
+| **24** | Plug receiver (switching) |
+
+Plugs that were only ever paired to a handheld remote do not answer the
+network scan; add them via **Configure → Add a device by serial number**.
 
 ### Weather stations (read-only)
 
@@ -252,6 +262,9 @@ WMS dimming actuators (types 26, 28, 31) are exposed as dimmable lights:
 Brightness only — the WMS protocol carries no colour information, so there is
 no colour control.
 
+A switching plug receiver (type 24) is exposed as an on/off light without a
+brightness control: on sends level 100, off sends level 0.
+
 On an existing setup, dimmers are picked up via
 **Configure → Add new devices** (a fresh scan is needed; existing devices and
 entities are unaffected).
@@ -322,6 +335,15 @@ Home Assistant uses different conventions than WMS:
 - Home Assistant: 0 = fully closed, 50 = horizontal, 100 = fully open
 - WMS: −100 = fully closed, 0 = horizontal, +100 = fully open
 - → Formula: `HA_tilt = (100 − WMS_angle) / 2`
+
+---
+
+## ❓ FAQ
+
+**Can I use the WMS USB Stick alongside my existing proprietary remote controls?**
+
+Yes. This integration just joins your existing WMS network, like an extra remote.
+The motors keep all their pairings; you don't lose the remotes.
 
 ---
 

@@ -152,6 +152,8 @@
       "valance_1": { "name": "Volant 1" },
       "valance_2": { "name": "Volant 2" },
       "product_type": { "name": "Produkttyp" },
+      "device_type": { "name": "Gerätetyp" },
+      "software_version": { "name": "Softwareversion" },
       "connection_tx_lqi": { "name": "Linkqualität (zum Gerät)" },
       "connection_tx_rssi": { "name": "Signalstärke (zum Gerät)" },
       "connection_rx_lqi": { "name": "Linkqualität (vom Gerät)" },
