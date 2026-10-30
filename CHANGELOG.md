@@ -16,6 +16,10 @@ All notable changes to this project will be documented in this file.
   become *unavailable* instead of showing a bogus value. (issue #17)
 - **Wind speed was reported at twice the real value.** The broadcast counts
   in 0.5 m/s steps, matching what WMS Studio displays. (issue #17)
+- **Hassfest validation passes again.** `pyserial` is bundled with Home
+  Assistant itself and recent Hassfest rules reject it in a custom
+  integration's manifest. The explicit requirement has been removed; the
+  integration keeps using the pyserial shipped with Home Assistant.
 - **Device discovery can now start from an idle command queue.** Starting a
   network scan enqueued its three scan requests but did not wake the USB-stick
   queue processor. If no other WMS command followed, Home Assistant waited for
