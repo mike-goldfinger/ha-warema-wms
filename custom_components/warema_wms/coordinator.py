@@ -71,10 +71,12 @@ class WeatherState:
 
     snr: int
     snr_hex: str
-    temp: float  # degrees Celsius
-    wind: float  # m/s
+    # None = the station has no such sensor (0xFF on the wire, issue #17).
+    temp: float | None  # degrees Celsius
+    wind: float | None  # m/s
     lumen: int  # brightness (lux)
-    rain: bool
+    rain: bool | None
+    battery: float | None  # percent
 
 
 class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
@@ -553,10 +555,11 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
             state = WeatherState(
                 snr=snr,
                 snr_hex=weather.get("snr_hex", ""),
-                temp=weather.get("temp", 0),
-                wind=weather.get("wind", 0),
+                temp=weather.get("temp"),
+                wind=weather.get("wind"),
                 lumen=weather.get("lumen", 0),
-                rain=bool(weather.get("rain", False)),
+                rain=weather.get("rain"),
+                battery=weather.get("battery"),
             )
             is_new = snr not in self.weather_data
             self.weather_data = {**self.weather_data, snr: state}

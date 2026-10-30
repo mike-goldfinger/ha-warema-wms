@@ -4,7 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+- **Weather station battery sensor.** The weather broadcast carries the
+  station's battery level (half-percent steps); it is now exposed as a
+  diagnostic `sensor` entity. (issue #17)
+
 ### Fixed
+- **Weather stations without a temperature or rain sensor no longer report
+  92.5 °C.** `FF` in the weather broadcast means "sensor not present"
+  (e.g. *Wetterstation eco*). The temperature, wind and rain entities now
+  become *unavailable* instead of showing a bogus value. (issue #17)
+- **Wind speed was reported at twice the real value.** The broadcast counts
+  in 0.5 m/s steps, matching what WMS Studio displays. (issue #17)
 - **Hassfest validation passes again.** `pyserial` is bundled with Home
   Assistant itself and recent Hassfest rules reject it in a custom
   integration's manifest. The explicit requirement has been removed; the

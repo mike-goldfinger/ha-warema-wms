@@ -148,6 +148,7 @@
       "weather_temperature": { "name": "Temperatur" },
       "weather_wind_speed": { "name": "Windgeschwindigkeit" },
       "weather_brightness": { "name": "Helligkeit" },
+      "weather_battery": { "name": "Batterie" },
       "valance_1": { "name": "Volant 1" },
       "valance_2": { "name": "Volant 2" },
       "product_type": { "name": "Produkttyp" }
