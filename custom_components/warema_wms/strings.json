@@ -222,7 +222,7 @@
       "ref_unreachable": "Could not read the values from the source blind; the selected device's own current values were loaded instead. The motor may be unreachable or asleep.",
       "device_already_added": "This device is already configured in Home Assistant.",
       "device_not_responding": "The device did not respond. Make sure it is powered and within radio range, and that the serial number is correct.",
-      "device_type_unsupported": "This device answered, but its type is not supported by this integration."
+      "device_type_unsupported": "This device answered, but its device type {device_type} is not supported yet (product type: {product_type}, firmware: {software_version}, radio mode: {radio_mode}). Please open a GitHub issue with these values so it can be added."
     },
     "abort": {
       "not_loaded": "The integration is not loaded. Make sure the WMS stick is connected and the integration is running, then try again.",

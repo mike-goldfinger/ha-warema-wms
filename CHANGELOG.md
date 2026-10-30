@@ -47,6 +47,10 @@ All notable changes to this project will be documented in this file.
   Home Assistant language; they now read "Device type" / "Software version"
   in English and keep their German names in a German UI. Entity IDs are
   unchanged.
+- **"Add a device by serial number" now says what it found.** When a device
+  answers the probe but its type is unknown to the integration, the form and
+  a log warning now show the device type, product type, firmware and radio
+  mode, so the values can be reported without enabling DEBUG logging.
 - **Weather stations without a temperature or rain sensor no longer report
   92.5 °C.** `FF` in the weather broadcast means "sensor not present"
   (e.g. *Wetterstation eco*). The temperature, wind and rain entities now
