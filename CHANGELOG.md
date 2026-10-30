@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- **Switching plug receivers (device type `24`) as on/off lights.** The WMS
+  Zwischenstecker that switches a light or socket reports device type `24`
+  and a switching product type (e.g. `16` LightSwitching). It is now accepted
+  by the scan and by "Add a device by serial number" and exposed as a light
+  entity without brightness: on sends level 100, off sends level 0, using the
+  same command the dimmers use. Plugs that were only ever paired to a handheld
+  remote never answer the scan; add them by serial number. (issue #1)
 - **Add a device by serial number.** Some actuators (e.g. the integrated
   lighting on a Lamaxa slat roof) are only ever paired to a handheld
   Wandsender and never join the WMS network on their own, so a broadcast scan
