@@ -11,6 +11,12 @@ All notable changes to this project will be documented in this file.
   dangling link has been dropped; devices are unaffected. (issue #14)
 
 ### Added
+- **Measure connection quality.** Every device gets a diagnostic button that
+  asks the USB stick to probe the radio link to that device, plus four
+  diagnostic sensors with the result: link quality and signal strength in
+  each direction (stick to device, device to stick), as raw values reported
+  by the stick. Useful to tell an out-of-range receiver from a protocol
+  problem. (issue #16)
 - **Device type `30` (plug receiver, newer generation) is now supported.**
   It answers the network scan like the known plug receiver (`21`) and is
   handled the same way, so awnings and sun sails driven by it show up as

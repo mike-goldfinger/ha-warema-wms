@@ -88,6 +88,8 @@ CMD_SETTINGS = {
     "blindStopMove": {"timeout": 0.200, "delay_after": 0.005, "retry": 3},
     "waveRequest": {"timeout": 0.500, "delay_after": 0.300, "retry": -1},
     "scanRequest": {"timeout": 0.750, "delay_after": 0.000, "retry": -1},
+    # Stick-side link measurement; WMS Studio uses 500 ms and 3 retries.
+    "connectionQuality": {"timeout": 0.500, "delay_after": 0.100, "retry": 3},
 }
 DEFAULT_TIMEOUT = 2.0
 DEFAULT_RETRY = -1  # -1 = no retry
@@ -1388,6 +1390,50 @@ class WmsStick:
 
         msg = WmsMessage("waveRequest", blind.snr, {})
         self._enqueue(msg)
+
+    def measure_connection_quality(
+        self, blind_id, timeout: float = 4.0
+    ) -> Optional[dict]:
+        """Ask the stick to measure the radio link to one device (blocking).
+
+        Sends ``{Q<snr>}``; the stick probes the device and answers with
+        LQI/RSSI for both directions. Returns a dict with ``tx_lqi``,
+        ``tx_rssi``, ``rx_lqi`` and ``rx_rssi`` (raw unsigned bytes as the
+        stick reports them), or ``None`` when the device did not answer.
+
+        Args:
+            blind_id: snr, snr_hex, or name
+            timeout: Overall wait including the command's own retries.
+        """
+        blind = self._get_blind(blind_id)
+        if not blind:
+            _LOGGER.warning(
+                "WmsStick: measure_connection_quality: Cannot find blind '%s'",
+                blind_id,
+            )
+            return None
+
+        done = threading.Event()
+        holder: dict = {"params": None}
+
+        def cb(error, msg_sent, msg_rcv):
+            if not error and msg_rcv is not None:
+                holder["params"] = dict(msg_rcv["params"])
+            done.set()
+
+        msg = WmsMessage("connectionQuality", blind.snr, {})
+        msg.on_end = cb
+        self._enqueue(msg, priority=True)
+        threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
+        if not done.wait(timeout):
+            _LOGGER.warning(
+                "WmsStick: connection quality for %s timed out", blind.snr_hex
+            )
+            return None
+        _LOGGER.info(
+            "WmsStick: connection quality %s: %s", blind.snr_hex, holder["params"]
+        )
+        return holder["params"]
 
     def set_pos_upd_interval(self, interval_sec: float) -> None:
         """Set the interval for automatic position polling.

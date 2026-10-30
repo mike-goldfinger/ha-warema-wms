@@ -446,6 +446,15 @@ def encode_cmd(cmd: str, snr, params: dict) -> dict:
         result["expect"]["msg_type"] = "stickVersion"
         result["cmd"] = "{V}"
 
+    elif cmd == "connectionQuality":
+        # Ask the stick to measure the radio link to one device. The stick
+        # exchanges a probe with the device itself and answers with LQI/RSSI
+        # for both directions (see decode_frame, "{q"). Not an R-frame, so
+        # the per-device key/transmission mode does not apply.
+        result["expect"]["msg_type"] = "connectionQuality"
+        result["expect"]["snr"] = snr_hex
+        result["cmd"] = "{Q" + snr_hex + "}"
+
     elif cmd == "stickSetKey":
         key = params.get("key", "")
         result["expect"]["msg_type"] = "ack"
@@ -593,6 +602,22 @@ def decode_frame(raw: str) -> dict:
     elif raw.startswith("{v"):
         msg_type = "stickVersion"
         params["stick_version"] = _wms_trim(raw[2:])
+
+    elif raw.startswith("{q"):
+        # Connection quality: {q<SNR6><txLQI2><txRSSI2><rxLQI2><rxRSSI2>}
+        # Raw unsigned bytes exactly as the stick reports them. "tx" is the
+        # stick -> device direction, "rx" is device -> stick.
+        body = raw[2:-1] if raw.endswith("}") else raw[2:]
+        body = body.strip().upper()
+        snr = body[0:6] if len(body) >= 6 else "000000"
+        if len(body) >= 14:
+            msg_type = "connectionQuality"
+            params["tx_lqi"] = int(body[6:8], 16)
+            params["tx_rssi"] = int(body[8:10], 16)
+            params["rx_lqi"] = int(body[10:12], 16)
+            params["rx_rssi"] = int(body[12:14], 16)
+        else:
+            _LOGGER.debug("decode_frame: short connection-quality frame: %s", raw)
 
     elif raw.startswith("{r"):
         # {r<SNR6><TYPE4><PAYLOAD>}

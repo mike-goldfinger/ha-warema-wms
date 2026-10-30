@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -66,6 +67,22 @@ class BlindState:
 
 
 @dataclass(frozen=True)
+class ConnectionQuality:
+    """Result of one stick-side radio link measurement to a device.
+
+    Raw unsigned values exactly as the stick reports them; ``tx`` is the
+    stick -> device direction, ``rx`` is device -> stick.
+    """
+
+    snr: int
+    tx_lqi: int
+    tx_rssi: int
+    rx_lqi: int
+    rx_rssi: int
+    measured_at: float  # time.time()
+
+
+@dataclass(frozen=True)
 class WeatherState:
     """Immutable snapshot of a weather station broadcast."""
 
@@ -107,6 +124,9 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
         self.weather_data: dict[int, WeatherState] = {}
         # Motor parameters read from block 38 + block 81 on startup.
         self.motor_params: dict[int, Any] = {}  # snr_int -> MotorParameters
+        # Last on-demand link measurement per device (see the
+        # "Measure connection quality" button).
+        self.connection_quality: dict[int, ConnectionQuality] = {}
 
     async def async_connect(self) -> None:
         """Connect to the WMS stick and wait for initialization.
@@ -464,6 +484,34 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
         """
         if self.stick:
             self.stick.blind_get_position(snr)
+
+    async def async_measure_connection_quality(
+        self, snr: int
+    ) -> ConnectionQuality | None:
+        """Measure the radio link to one device and publish the result.
+
+        Runs the blocking stick call in the executor. On success the result
+        is stored in ``self.connection_quality`` and listeners are notified;
+        on no answer the previous result is kept and ``None`` is returned.
+        """
+        if not self.stick:
+            return None
+        params = await self.hass.async_add_executor_job(
+            self.stick.measure_connection_quality, snr
+        )
+        if not params:
+            return None
+        result = ConnectionQuality(
+            snr=snr,
+            tx_lqi=int(params.get("tx_lqi", 0)),
+            tx_rssi=int(params.get("tx_rssi", 0)),
+            rx_lqi=int(params.get("rx_lqi", 0)),
+            rx_rssi=int(params.get("rx_rssi", 0)),
+            measured_at=time.time(),
+        )
+        self.connection_quality = {**self.connection_quality, snr: result}
+        self.async_update_listeners()
+        return result
 
     def wave(self, snr: int) -> None:
         """Send a wave (identify) request so the blind briefly moves.
