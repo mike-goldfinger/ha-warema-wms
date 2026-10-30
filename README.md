@@ -111,6 +111,7 @@ Any motor reachable from one of these WMS actuators:
 | **25** | Radio motor |
 | **2A** | Radio motor (Lamellendach L60/L70) |
 | **2E** | Actuator 230V UP |
+| **30** | Plug receiver (newer generation) |
 
 ### Dimming actuators (light entities)
 
