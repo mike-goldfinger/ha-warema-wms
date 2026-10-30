@@ -42,6 +42,11 @@ All notable changes to this project will be documented in this file.
   diagnostic `sensor` entity. (issue #17)
 
 ### Fixed
+- **"Gerätetyp" and "Softwareversion" diagnostic sensors are now translated.**
+  Their names were hard-coded in German while every other entity follows the
+  Home Assistant language; they now read "Device type" / "Software version"
+  in English and keep their German names in a German UI. Entity IDs are
+  unchanged.
 - **Weather stations without a temperature or rain sensor no longer report
   92.5 °C.** `FF` in the weather broadcast means "sensor not present"
   (e.g. *Wetterstation eco*). The temperature, wind and rain entities now
