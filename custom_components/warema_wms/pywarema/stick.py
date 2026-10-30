@@ -47,6 +47,7 @@ from .protocol import (
     ADDR_MOTOR_ROTATION,
     ADDR_RUN_TIME_DOWN,
     ADDR_RUN_TIME_UP,
+    ADDR_SLAT_ROOF_MIN_ANGLE,
     ADDR_TILTING_STEPS,
     ADDR_TILTING_TIME,
     SUPPORTED_DEVICE_TYPES,
@@ -56,9 +57,12 @@ from .protocol import (
     PRODUCT_TYPES_WITH_TILT,
     SW_INFO_ADDR,
     SW_INFO_BLOCK,
+    SW_INFO_DEVICE_TYPE_OFFSET,
     SW_INFO_SIZE,
+    has_slat_roof_param_layout,
     has_standard_param_layout,
     MotorParameters,
+    angle_hex_to_percent,
     decode_frame,
     encode_cmd,
     manual_position_from_byte,
@@ -89,8 +93,26 @@ CMD_SETTINGS = {
     "waveRequest": {"timeout": 0.500, "delay_after": 0.300, "retry": -1},
     "scanRequest": {"timeout": 0.750, "delay_after": 0.000, "retry": -1},
 }
+
+# blindMoveToPos retries used for tilt-only motors (slat roofs), which have no
+# position axis and, per issue #7's logs, go back to sleep noticeably more
+# eagerly than the geared actuators the default retry count was tuned for -
+# a get-position poll on one has timed out mere seconds after it stopped
+# moving. The default 4 attempts (retry=3) at 0.5 s only cover ~2 s, too
+# short a window to catch such a motor waking back up; this raises it to
+# ~5 s, matching the wake+control time budget WMS Studio Pro's own protocol
+# allots a single command - see issue #7.
+SLAT_ROOF_MOVE_RETRY = 9
 DEFAULT_TIMEOUT = 2.0
 DEFAULT_RETRY = -1  # -1 = no retry
+
+# "{R<key mode><transmission mode>": key 0 = factory key, 1 = network key;
+# transmission 1 = P2P, 6 = WideP2P (Studio: EWMSKeyMode / EWMSTransmissionMode).
+DEFAULT_RADIO_MODE = "06"
+PROBE_RADIO_MODES = ("11", "16", "01", DEFAULT_RADIO_MODE)
+# Devices that never joined a network listen on the broadcast PAN with the factory key.
+BROADCAST_PAN_ID = "FFFF"
+BROADCAST_PAN_RADIO_MODES = ("01", DEFAULT_RADIO_MODE)
 
 # Retry count for background position polls (pos-upd / watch-moving). The full
 # CMD_SETTINGS retry (5) is meant for one-shot user queries; a periodic 5 s poll
@@ -147,6 +169,16 @@ class Blind:
     product_type: int | None = None
     product_type_str: str | None = None
     is_with_blinds: bool | None = None  # True if the motor has tilting slats
+    # Two digits after "{R" in unicast frames: key mode + transmission mode.
+    # Radio motors answer the factory key ("06"); some actuators (dimmers)
+    # only answer the network key ("11"), as WMS Studio Pro uses by default.
+    radio_mode: str = DEFAULT_RADIO_MODE
+    # Real tilt-angle range in degrees, read from Block 38 (productSettings).
+    # None means "not yet read" - callers fall back to the WMS_ANGLE default
+    # (-75..+75, correct for venetian blinds). Slat-roof motors use a
+    # different, sometimes asymmetric range (e.g. -45..+90). See issue #7.
+    min_angle: int | None = None
+    max_angle: int | None = None
 
 
 class WmsMessage:
@@ -178,6 +210,13 @@ class WmsMessage:
         self.on_end: Optional[Callable] = None
         self.queued_ts = time.time()
         self.com_ts: Optional[float] = None
+
+    def apply_radio_mode(self, radio_mode: str) -> None:
+        """Re-address a default-mode unicast frame with another radio mode."""
+        default_prefix = "{R" + DEFAULT_RADIO_MODE
+        frame = self.stick_cmd["cmd"]
+        if radio_mode != DEFAULT_RADIO_MODE and frame.startswith(default_prefix):
+            self.stick_cmd["cmd"] = "{R" + radio_mode + frame[len(default_prefix) :]
 
 
 class WmsStick:
@@ -422,10 +461,14 @@ class WmsStick:
                     p.get("angle"),
                     blind.product_type,
                 )
+                # decode_frame() scaled angle_raw with the default (venetian
+                # blind) range. Re-scale it with this motor's real, possibly
+                # asymmetric range when known (e.g. slat roofs: -45..+90
+                # instead of the assumed -75..+75) - see issue #7.
+                ang = self._rescale_angle(blind, p)
                 # The position poll cannot read the slat angle back while the
                 # blind is raised (angle == None). Keep the last known angle in
                 # that case instead of discarding it.
-                ang = p.get("angle")
                 if ang is None:
                     ang = blind.pos_current.ang
                 new_pos = BlindPosition(
@@ -448,7 +491,7 @@ class WmsStick:
     def blind_set_position(
         self,
         blind_id,
-        position: int,
+        position: Optional[int],
         angle: Optional[int],
         on_complete: Optional[Callable] = None,
         valance_1: Optional[int] = None,
@@ -458,7 +501,10 @@ class WmsStick:
 
         Args:
             blind_id: snr, snr_hex, or name
-            position: 0-100 (0=open, 100=closed)
+            position: 0-100 (0=open, 100=closed), or None to leave the
+                position unchanged. Needed for tilt-only actuators (e.g.
+                slat roofs) that have no position axis and reject a frame
+                that names one - see issue #7.
             angle: -100 to +100 (slat angle), or None to leave the slats alone
             on_complete: Optional callback(error, msg_sent, msg_rcv) called when
                          the motor acknowledges the command.
@@ -483,7 +529,7 @@ class WmsStick:
             return
 
         blind.pos_requested = BlindPosition(
-            pos=position,
+            pos=blind.pos_current.pos if position is None else position,
             ang=blind.pos_current.ang if angle is None else angle,
             moving=True,
             valance_1=(
@@ -519,17 +565,29 @@ class WmsStick:
             if on_complete:
                 on_complete(error, msg_sent, msg_rcv)
 
-        msg = WmsMessage(
-            "blindMoveToPos",
-            blind.snr,
-            {
-                "pos": position,
-                "ang": angle,
-                "valance_1": valance_1,
-                "valance_2": valance_2,
-            },
-        )
+        msg_params = {
+            "pos": position,
+            "ang": angle,
+            "valance_1": valance_1,
+            "valance_2": valance_2,
+        }
+        # Encode the angle with this motor's real range when known (e.g. a
+        # slat roof's -45..+90), so outgoing commands land on the same
+        # physical angle that incoming readings are decoded to - see issue #7.
+        if blind.min_angle is not None:
+            msg_params["min_angle"] = blind.min_angle
+        if blind.max_angle is not None:
+            msg_params["max_angle"] = blind.max_angle
+        msg = WmsMessage("blindMoveToPos", blind.snr, msg_params)
         msg.on_end = _on_complete
+        if has_slat_roof_param_layout(blind.product_type):
+            msg.retry = SLAT_ROOF_MOVE_RETRY
+        # Drop any blindMoveToPos still queued/retrying for this blind before
+        # adding the new target: without this, clicking the tilt slider again
+        # while the motor hasn't answered the previous command yet (e.g. it
+        # went back to sleep) piles up multiple, sometimes contradictory,
+        # targets that then fire one after another - see issue #7.
+        self._remove_queued_msgs(cmd="blindMoveToPos", snr_hex=blind.snr_hex)
         self._enqueue(msg, priority=True)
         threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
 
@@ -728,6 +786,9 @@ class WmsStick:
             )
             return None
 
+        if has_slat_roof_param_layout(blind.product_type):
+            return self._read_slat_roof_angle_range(blind, timeout)
+
         if not has_standard_param_layout(blind.product_type):
             _LOGGER.debug(
                 "WmsStick: read_motor_parameters: skipping %s, product type %s "
@@ -887,15 +948,90 @@ class WmsStick:
         )
         return params
 
+    def _read_slat_roof_angle_range(
+        self, blind: "Blind", timeout: float
+    ) -> Optional[MotorParameters]:
+        """Read the tilt-angle range (productSettings.minAngle/maxAngle) for a
+        slat-roof motor (Lamellendach).
+
+        Slat-roof motors lay out block 38 differently from the standard
+        actuator layout: there is no position axis, so productSettings is
+        much shorter and minAngle/maxAngle sit at addresses 463/464 instead
+        of 472/473 - verified against WMS Studio Pro's own decrypted PLists
+        (issue #7). The other fields (run/calibration times, tilting steps,
+        motor rotation) either don't exist for this product or aren't needed
+        for tilt scaling, so only the two angle bytes are read.
+
+        Also updates ``blind.min_angle``/``blind.max_angle`` directly so the
+        live position-poll callback can scale ``angle_raw`` correctly without
+        a second round trip.
+        """
+        params = MotorParameters()
+        done = threading.Event()
+        result: dict = {"failed": False}
+
+        def on_complete(error, msg_sent, msg_rcv):
+            if error == "timeout" or msg_rcv is None:
+                result["failed"] = True
+            else:
+                data = msg_rcv["params"].get("data", b"")
+                if len(data) >= 2:
+                    params.min_angle = product_angle_from_byte(data[0])
+                    params.max_angle = product_angle_from_byte(data[1])
+            done.set()
+
+        self.mb8_read(
+            blind.snr_hex,
+            block=MOTOR_PARAM_BLOCK,
+            addr=ADDR_SLAT_ROOF_MIN_ANGLE,
+            size=2,
+            on_complete=on_complete,
+        )
+
+        if not done.wait(timeout) or result["failed"]:
+            _LOGGER.warning(
+                "WmsStick: _read_slat_roof_angle_range: read failed for %s",
+                blind.snr_hex,
+            )
+            return None
+
+        # A degenerate range (equal or reversed bounds) would make every
+        # angle scaling divide by zero / go backwards. Leave blind.min_angle/
+        # max_angle at None (default -75..+75) rather than adopting a bad
+        # read - a misread device should fall back, not break tilt scaling.
+        if (
+            params.min_angle is not None
+            and params.max_angle is not None
+            and params.min_angle < params.max_angle
+        ):
+            blind.min_angle = params.min_angle
+            blind.max_angle = params.max_angle
+        else:
+            _LOGGER.warning(
+                "WmsStick: _read_slat_roof_angle_range: implausible range for "
+                "%s (min=%s max=%s), keeping default",
+                blind.snr_hex,
+                params.min_angle,
+                params.max_angle,
+            )
+        _LOGGER.info(
+            "WmsStick: slat-roof angle range for %s: min=%s max=%s",
+            blind.snr_hex,
+            params.min_angle,
+            params.max_angle,
+        )
+        return params
+
     def read_block81_info(self, blind_id, timeout: float = 3.0) -> tuple:
         """Read firmware version and device type from Block 81 (read-only).
 
         Returns a ``(software_version, device_type_name)`` tuple.  Both values
         may be ``None`` if the read fails or the device does not support Block 81.
 
-        The exact byte layout of Block 81 is not yet fully documented.  The raw
-        bytes are logged at INFO level so the correct offsets can be derived from
-        a known reference value (e.g. software_version "5930141007").
+        Layout verified against WMS Studio Pro's own read of this block
+        (``ReadDeviceMetaDataConvBlock81Conv``): starting at ``SW_INFO_ADDR``
+        (24), the software version is an 11-char Latin-1 string at offset 0
+        and the device-type byte is at ``SW_INFO_DEVICE_TYPE_OFFSET`` (19).
         """
         blind = self._get_blind(blind_id)
         if not blind:
@@ -917,22 +1053,19 @@ class WmsStick:
 
         _LOGGER.info("Block81 raw for %s: %s", blind.snr_hex, data.hex())
 
-        # Decode software version (dataTypeId 288): try to interpret as a
-        # 10-digit BCD number encoded in 5 bytes at offset 0, or as a 4-byte
-        # little-endian uint32.  After the first real test the correct decoder
-        # should replace these placeholders.
         sw_ver: Optional[str] = None
         dev_type: Optional[str] = None
         try:
-            # Attempt BCD decode of first 5 bytes
-            bcd = data[:5].hex()
-            sw_ver = str(int(bcd))  # strips leading zeros from BCD string
+            raw = data[0:11]
+            # WMS-compliant Latin-1 string: 0xFF/0x00 padding after the text.
+            end = next((i for i, b in enumerate(raw) if b in (0x00, 0xFF)), len(raw))
+            sw_ver = raw[:end].decode("latin-1").strip() or None
         except Exception:  # pylint: disable=broad-except
-            sw_ver = data[:5].hex() if len(data) >= 5 else None
+            sw_ver = data[0:11].hex() if len(data) >= 11 else None
 
         try:
-            if len(data) >= 6:
-                dev_type = f"0x{data[5]:02X}"
+            if len(data) > SW_INFO_DEVICE_TYPE_OFFSET:
+                dev_type = f"0x{data[SW_INFO_DEVICE_TYPE_OFFSET]:02X}"
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -943,6 +1076,73 @@ class WmsStick:
             dev_type,
         )
         return sw_ver, dev_type
+
+    def probe_radio_mode(self, blind_id) -> tuple[Optional[str], Optional[str]]:
+        """Find the key/transmission mode a device answers a block 81 read on.
+
+        Returns ``(radio_mode, pan_id)``; ``(None, None)`` if nothing answered.
+        On success the mode is stored on the blind. A hit on the broadcast PAN
+        is reported but not usable for control: the stick is switched back to
+        its own PAN before returning.
+        """
+        blind = self._get_blind(blind_id)
+        if not blind:
+            return None, None
+
+        def answers(radio_mode: str) -> bool:
+            blind.radio_mode = radio_mode
+            data = self._mb8_read_sync(
+                blind.snr_hex,
+                block=SW_INFO_BLOCK,
+                addr=SW_INFO_ADDR,
+                size=SW_INFO_SIZE,
+            )
+            _LOGGER.info(
+                "probe_radio_mode %s: R%s -> %s",
+                blind.snr_hex,
+                radio_mode,
+                "answer" if data else "no answer",
+            )
+            return bool(data)
+
+        for radio_mode in PROBE_RADIO_MODES:
+            if answers(radio_mode):
+                return radio_mode, self.pan_id
+
+        found = None
+        self._switch_pan_sync(BROADCAST_PAN_ID)
+        try:
+            for radio_mode in BROADCAST_PAN_RADIO_MODES:
+                if answers(radio_mode):
+                    found = radio_mode
+                    break
+        finally:
+            self._switch_pan_sync(self.pan_id)
+
+        blind.radio_mode = DEFAULT_RADIO_MODE
+        if found:
+            _LOGGER.warning(
+                "probe_radio_mode %s: answers only on broadcast PAN %s (R%s) - "
+                "device has not joined network %s",
+                blind.snr_hex,
+                BROADCAST_PAN_ID,
+                found,
+                self.pan_id,
+            )
+            return found, BROADCAST_PAN_ID
+        return None, None
+
+    def _switch_pan_sync(self, pan_id: str, timeout: float = 3.0) -> None:
+        """Point the stick at another PAN on the current channel; wait for ack."""
+        done = threading.Event()
+        msg = WmsMessage(
+            "stickSwitchChannel", 0, {"channel": self.channel, "pan_id": pan_id}
+        )
+        msg.on_end = lambda *_: done.set()
+        self._enqueue(msg)
+        threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
+        if not done.wait(timeout):
+            _LOGGER.warning("WmsStick: no ack for PAN switch to %s", pan_id)
 
     def _mb8_read_sync(
         self, snr_hex, block: int, addr: int, size: int, timeout: float = 3.0
@@ -1439,6 +1639,32 @@ class WmsStick:
     # Internal helpers
     # -----------------------------------------------------------------------
 
+    @staticmethod
+    def _rescale_angle(blind: Blind, params: dict) -> Optional[int]:
+        """Re-scale a decoded position frame's angle to this motor's real range.
+
+        ``decode_frame()`` has no knowledge of the motor's product type, so it
+        scales ``angle_raw`` with the default (venetian-blind) -75..+75 range.
+        Once the motor's real range is known (``blind.min_angle``/``max_angle``,
+        read via ``_read_slat_roof_angle_range`` for slat roofs), re-derive the
+        percentage from the raw byte with that range instead - see issue #7.
+
+        Returns ``None`` unchanged (angle not available, e.g. blind raised).
+        """
+        angle = params.get("angle")
+        if angle is None:
+            return None
+        if blind.min_angle is None or blind.max_angle is None:
+            return angle
+        angle_raw = params.get("angle_raw")
+        if angle_raw is None:
+            return angle
+        return angle_hex_to_percent(
+            format(angle_raw, "02X"),
+            min_angle=blind.min_angle,
+            max_angle=blind.max_angle,
+        )
+
     def _get_blind(self, blind_id) -> Optional[Blind]:
         """Find a blind by snr (int), snr_hex (str), or name (str)."""
         if blind_id is None:
@@ -1484,6 +1710,9 @@ class WmsStick:
 
     def _enqueue(self, msg: WmsMessage, priority: bool = False) -> None:
         """Add a message to the command queue."""
+        blind = self._blinds.get(msg.snr)
+        if blind is not None:
+            msg.apply_radio_mode(blind.radio_mode)
         with self._queue_lock:
             if priority:
                 self._msg_queue.insert(0, msg)

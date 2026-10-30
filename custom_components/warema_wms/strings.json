@@ -81,8 +81,19 @@
         "description": "Choose what you want to do.",
         "menu_options": {
           "rescan": "Scan for new devices",
+          "add_by_serial": "Add a device by serial number",
           "configure_firmware": "Configure motor firmware parameters",
           "device_settings": "Display: position direction (awnings)"
+        }
+      },
+      "add_by_serial": {
+        "title": "Warema WMS – Add Device by Serial Number",
+        "description": "Use this when a device does not show up under \"Scan for new devices\" even though it works fine from its handheld Wandsender (remote control) - for example the integrated lighting on a Lamaxa slat roof. Such devices are sometimes only ever paired to the Wandsender and never join the WMS network on their own, so the normal scan never sees them.\n\nEnter the device's serial number (decimal, as shown in WMS Studio Pro or on the device's label). The integration will try to read it directly.",
+        "data": {
+          "serial_number": "Serial number"
+        },
+        "data_description": {
+          "serial_number": "Decimal serial number, e.g. 1688396"
         }
       },
       "device_settings": {
@@ -208,7 +219,10 @@
     },
     "error": {
       "write_failed": "Writing parameters to the motor failed. The motor may be unreachable, asleep, or in use. Wake it via the handheld remote and try again. Check the Home Assistant log for per-step details.",
-      "ref_unreachable": "Could not read the values from the source blind; the selected device's own current values were loaded instead. The motor may be unreachable or asleep."
+      "ref_unreachable": "Could not read the values from the source blind; the selected device's own current values were loaded instead. The motor may be unreachable or asleep.",
+      "device_already_added": "This device is already configured in Home Assistant.",
+      "device_not_responding": "The device did not respond. Make sure it is powered and within radio range, and that the serial number is correct.",
+      "device_type_unsupported": "This device answered, but its type is not supported by this integration."
     },
     "abort": {
       "not_loaded": "The integration is not loaded. Make sure the WMS stick is connected and the integration is running, then try again.",

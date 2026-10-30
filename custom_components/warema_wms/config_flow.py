@@ -1165,7 +1165,12 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
         """Entry point: show a menu choosing rescan vs. firmware config."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["rescan", "configure_firmware", "device_settings"],
+            menu_options=[
+                "rescan",
+                "add_by_serial",
+                "configure_firmware",
+                "device_settings",
+            ],
         )
 
     # ------------------------------------------------------------------
@@ -1244,6 +1249,61 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
             description_placeholders={
                 "device_count": str(len(self._discovered_devices)),
             },
+        )
+
+    # ------------------------------------------------------------------
+    # Add a device by serial number (no broadcast scan)
+    # ------------------------------------------------------------------
+
+    async def async_step_add_by_serial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Identify and add a device directly by its serial number.
+
+        Some actuators (observed on Warema Lamaxa slat-roof lighting, see
+        issue #8) never join the WMS network on their own and so never answer
+        a broadcast scan - they were only ever paired to a handheld Wandsender.
+        Such a device is still reachable directly once its serial number is
+        known (e.g. from WMS Studio Pro or the device's label).
+        """
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if coordinator is None:
+            return self.async_abort(reason="not_loaded")
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            snr = user_input["serial_number"]
+            existing_snrs = {
+                int(d["snr"])
+                for d in self.config_entry.data.get(CONF_DEVICES, [])
+                if d.get("snr") is not None
+            }
+            if snr in existing_snrs:
+                errors["serial_number"] = "device_already_added"
+            else:
+                try:
+                    probed = await coordinator.async_probe_device_by_serial(snr)
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Failed to probe device by serial number %s", snr)
+                    probed = None
+                if probed is None:
+                    errors["base"] = "device_not_responding"
+                elif probed.get("device_type", "") not in SUPPORTED_DEVICE_TYPES:
+                    errors["base"] = "device_type_unsupported"
+                else:
+                    self._discovered_devices = [probed]
+                    return await self.async_step_select_devices()
+
+        return self.async_show_form(
+            step_id="add_by_serial",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("serial_number"): vol.All(
+                        vol.Coerce(int), vol.Range(min=1, max=0xFFFFFF)
+                    ),
+                }
+            ),
+            errors=errors,
         )
 
     # ------------------------------------------------------------------
