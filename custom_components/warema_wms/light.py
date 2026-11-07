@@ -1,12 +1,16 @@
 """Light platform for the Warema WMS integration.
 
-Exposes WMS dimming actuators as light entities.
+Exposes WMS dimming and switching actuators as light entities.
 
 A WMS light is always a stand-alone actuator with its own serial number - it is
 never a sub-channel of a motor - and it answers the same broadcast scan as any
 other device. Its brightness is carried in the same state byte and with the same
 encoding a motor uses for its position (percent * 2), and it is driven by the
 same command.
+
+A switching actuator (plug receiver, type 24) uses the same command and state
+byte but knows only two levels: 100 is on, 0 is off. It is exposed as an on/off
+light without brightness.
 
 Brightness only: the protocol carries no colour information.
 """
@@ -30,7 +34,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     CONF_DEVICES,
     DOMAIN,
-    LIGHT_DIMMER_DEVICE_TYPES,
+    LIGHT_DEVICE_TYPES,
+    is_switch_light_device,
 )
 from .coordinator import WaremaCoordinator
 
@@ -52,7 +57,7 @@ async def async_setup_entry(
 
     for device in entry.data.get(CONF_DEVICES, []):
         device_type = device.get("device_type", "")
-        if device_type not in LIGHT_DIMMER_DEVICE_TYPES:
+        if device_type not in LIGHT_DEVICE_TYPES:
             continue
 
         snr = device.get("snr")
@@ -70,6 +75,7 @@ async def async_setup_entry(
                 device_type_str=device_type_str,
                 entry_id=entry.entry_id,
                 product_type=device.get("product_type"),
+                switch_only=is_switch_light_device(device_type),
             )
         )
 
@@ -89,11 +95,9 @@ def _ha_brightness_to_wms_level(brightness: int) -> int:
 
 
 class WaremaLight(CoordinatorEntity[WaremaCoordinator], LightEntity):
-    """A WMS dimming actuator as a dimmable light."""
+    """A WMS dimming actuator as a dimmable light, or a switching one as on/off."""
 
     _attr_has_entity_name = True
-    _attr_color_mode = ColorMode.BRIGHTNESS
-    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
 
     def __init__(
         self,
@@ -104,6 +108,7 @@ class WaremaLight(CoordinatorEntity[WaremaCoordinator], LightEntity):
         device_type_str: str,
         entry_id: str,
         product_type: int | None = None,
+        switch_only: bool = False,
     ) -> None:
         """Initialize the light."""
         super().__init__(coordinator, context=snr)
@@ -112,11 +117,18 @@ class WaremaLight(CoordinatorEntity[WaremaCoordinator], LightEntity):
         self._device_type_str = device_type_str
         self._entry_id = entry_id
         self._product_type = product_type
+        self._switch_only = switch_only
         # Brightness to restore on "turn on" without an explicit brightness.
         self._last_level: int | None = None
 
         self._attr_name = name
         self._attr_unique_id = f"{DOMAIN}_{snr_hex}"
+        if switch_only:
+            self._attr_color_mode = ColorMode.ONOFF
+            self._attr_supported_color_modes = {ColorMode.ONOFF}
+        else:
+            self._attr_color_mode = ColorMode.BRIGHTNESS
+            self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
 
     def _get_state(self):
         """Return the coordinator state for this device, if any."""
@@ -161,7 +173,12 @@ class WaremaLight(CoordinatorEntity[WaremaCoordinator], LightEntity):
 
     @property
     def brightness(self) -> int | None:
-        """Return the current brightness (0-255), or None when unknown."""
+        """Return the current brightness (0-255), or None when unknown.
+
+        A switching actuator has no brightness; HA expects None for ONOFF.
+        """
+        if self._switch_only:
+            return None
         level = self._level
         if level is None:
             return None
@@ -169,7 +186,10 @@ class WaremaLight(CoordinatorEntity[WaremaCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally at a given brightness."""
-        if ATTR_BRIGHTNESS in kwargs:
+        if self._switch_only:
+            # Only two levels exist; anything but 0 is "on".
+            level = DEFAULT_ON_LEVEL
+        elif ATTR_BRIGHTNESS in kwargs:
             level = _ha_brightness_to_wms_level(kwargs[ATTR_BRIGHTNESS])
             # Brightness 0 would be an "off" command; keep the light on at its
             # lowest usable level instead, matching what HA expects here.

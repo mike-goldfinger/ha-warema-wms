@@ -49,10 +49,11 @@ _SENSOR_DEFS = [
     ("angle", "WMS Angle", None, "mdi:angle-acute"),
 ]
 
-# (attr, name, icon) for read-only motor info sensors (Block 81, diagnostic).
+# (attr, translation_key, icon) for read-only motor info sensors (Block 81,
+# diagnostic).
 _MOTOR_INFO_SENSOR_DEFS = [
-    ("software_version", "Softwareversion", "mdi:chip"),
-    ("device_type_name", "Gerätetyp", "mdi:cog"),
+    ("software_version", "software_version", "mdi:chip"),
+    ("device_type_name", "device_type", "mdi:cog"),
 ]
 
 # (attr, translation_key, icon) for the on-demand link measurement, filled by
@@ -175,7 +176,7 @@ async def async_setup_entry(
         )
 
         # Diagnostic sensors for firmware / hardware info (Block 81)
-        for attr, name, icon in _MOTOR_INFO_SENSOR_DEFS:
+        for attr, translation_key, icon in _MOTOR_INFO_SENSOR_DEFS:
             entities.append(
                 WaremaMotorInfoSensor(
                     coordinator=coordinator,
@@ -184,7 +185,7 @@ async def async_setup_entry(
                     device_type_str=device_type_str,
                     entry_id=entry.entry_id,
                     attr=attr,
-                    name=name,
+                    translation_key=translation_key,
                     icon=icon,
                 )
             )
@@ -422,7 +423,7 @@ class WaremaMotorInfoSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         device_type_str: str,
         entry_id: str,
         attr: str,
-        name: str,
+        translation_key: str,
         icon: str,
     ) -> None:
         super().__init__(coordinator, context=snr)
@@ -432,7 +433,7 @@ class WaremaMotorInfoSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         self._entry_id = entry_id
         self._attr_key = attr
 
-        self._attr_name = name
+        self._attr_translation_key = translation_key
         self._attr_icon = icon
         self._attr_unique_id = f"{DOMAIN}_{snr_hex}_{attr}"
 

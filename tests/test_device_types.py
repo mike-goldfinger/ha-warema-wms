@@ -26,7 +26,9 @@ sys.path.insert(
 from pywarema.device_types import (  # noqa: E402
     device_type_name,
     is_cover_device,
+    is_light_device,
     is_supported_device,
+    is_switch_light_device,
     platform_for_device_type,
 )
 from pywarema.protocol import decode_frame  # noqa: E402
@@ -38,6 +40,23 @@ class DeviceTypeRoutingTest(unittest.TestCase):
             with self.subTest(device_type=dt):
                 self.assertTrue(is_cover_device(dt))
                 self.assertEqual(platform_for_device_type(dt), "cover")
+
+    def test_dimmer_types_route_to_light_with_brightness(self):
+        for dt in ("26", "28", "31"):
+            with self.subTest(device_type=dt):
+                self.assertTrue(is_light_device(dt))
+                self.assertFalse(is_switch_light_device(dt))
+                self.assertEqual(platform_for_device_type(dt), "light")
+
+    def test_type_24_is_a_switching_light(self):
+        # Issue #1: WMS plug receiver "Licht", dev_type 0x24, product type 16
+        # (LightSwitching). Answers the serial-number probe on R11.
+        self.assertTrue(is_supported_device("24"))
+        self.assertTrue(is_light_device("24"))
+        self.assertTrue(is_switch_light_device("24"))
+        self.assertFalse(is_cover_device("24"))
+        self.assertEqual(platform_for_device_type("24"), "light")
+        self.assertNotEqual(device_type_name("24"), "<unknown>")
 
     def test_type_30_is_named_and_supported(self):
         # Issue #18: newer plug receiver generation, previously "<unknown>".

@@ -44,6 +44,9 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
 )
 
 from .const import (
@@ -145,13 +148,15 @@ def _init_stick_probe(port: str, channel: int, pan_id: str, key: str) -> serial.
     Returns the open serial.Serial object.
     Raises serial.SerialException on failure.
     """
-    ser = serial.Serial(
-        port=port,
+    # ``port`` is a device path or a pyserial URL (``socket://host:port``).
+    ser = serial.serial_for_url(
+        port,
         baudrate=125000,
         bytesize=serial.EIGHTBITS,
         parity=serial.PARITY_NONE,
         stopbits=serial.STOPBITS_ONE,
         timeout=0.1,
+        write_timeout=1.0,
     )
     import time
 
@@ -543,8 +548,11 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Step 1: Ask for the serial port path.
 
-        Automatically discovers FTDI FT232R devices and offers them in a dropdown,
-        or auto-selects if only one is found.
+        After USB discovery the discovered device is used directly.  In the
+        manual flow the detected FTDI FT232R devices are offered as dropdown
+        suggestions, but the field always accepts a typed value as well, so a
+        stick exposed over the network (``socket://host:port`` via ser2net)
+        can be entered even when unrelated FTDI adapters are plugged in.
         """
         errors: dict[str, str] = {}
 
@@ -556,40 +564,38 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._user_input[CONF_SERIAL_PORT] = port
                 return await self.async_step_discovery()
 
-        # Auto-discover FTDI devices
-        ftdi_devices = await self.hass.async_add_executor_job(_find_ftdi_devices)
-
-        # If exactly one FTDI device found, auto-select it and continue
-        if len(ftdi_devices) == 1:
-            self._user_input[CONF_SERIAL_PORT] = ftdi_devices[0][0]
+        # USB discovery already identified the stick: no need to ask
+        if self._usb_discovery_info is not None and self._user_input.get(
+            CONF_SERIAL_PORT
+        ):
             return await self.async_step_discovery()
 
-        # Build schema based on devices found
+        # Auto-discover FTDI devices as suggestions
+        ftdi_devices = await self.hass.async_add_executor_job(_find_ftdi_devices)
+
+        default_port = self._user_input.get(CONF_SERIAL_PORT) or (
+            ftdi_devices[0][0] if ftdi_devices else DEFAULT_SERIAL_PORT
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SERIAL_PORT, default=default_port): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": port, "label": f"{desc} ({port})"}
+                            for port, desc in ftdi_devices
+                        ],
+                        custom_value=True,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }
+        )
+
         if ftdi_devices:
-            # Multiple devices found: offer dropdown
-            port_choices = {port: desc for port, desc in ftdi_devices}
-            default_port = ftdi_devices[0][0]
-
-            schema = vol.Schema(
-                {
-                    vol.Required(CONF_SERIAL_PORT, default=default_port): vol.In(
-                        port_choices
-                    ),
-                }
-            )
-
             devices_list = "\n".join(
                 [f"- {desc} ({port})" for port, desc in ftdi_devices]
             )
         else:
-            # No FTDI devices found: show manual text input
-            default_port = self._user_input.get(CONF_SERIAL_PORT, DEFAULT_SERIAL_PORT)
-            schema = vol.Schema(
-                {
-                    vol.Required(CONF_SERIAL_PORT, default=default_port): str,
-                }
-            )
-
             devices_list = "(No devices detected)"
 
         return self.async_show_form(
@@ -1165,7 +1171,12 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
         """Entry point: show a menu choosing rescan vs. firmware config."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["rescan", "configure_firmware", "device_settings"],
+            menu_options=[
+                "rescan",
+                "add_by_serial",
+                "configure_firmware",
+                "device_settings",
+            ],
         )
 
     # ------------------------------------------------------------------
@@ -1244,6 +1255,86 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
             description_placeholders={
                 "device_count": str(len(self._discovered_devices)),
             },
+        )
+
+    # ------------------------------------------------------------------
+    # Add a device by serial number (no broadcast scan)
+    # ------------------------------------------------------------------
+
+    async def async_step_add_by_serial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Identify and add a device directly by its serial number.
+
+        Some actuators (observed on Warema Lamaxa slat-roof lighting, see
+        issue #8) never join the WMS network on their own and so never answer
+        a broadcast scan - they were only ever paired to a handheld Wandsender.
+        Such a device is still reachable directly once its serial number is
+        known (e.g. from WMS Studio Pro or the device's label).
+        """
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if coordinator is None:
+            return self.async_abort(reason="not_loaded")
+
+        errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {}
+        if user_input is not None:
+            snr = user_input["serial_number"]
+            existing_snrs = {
+                int(d["snr"])
+                for d in self.config_entry.data.get(CONF_DEVICES, [])
+                if d.get("snr") is not None
+            }
+            if snr in existing_snrs:
+                errors["serial_number"] = "device_already_added"
+            else:
+                try:
+                    probed = await coordinator.async_probe_device_by_serial(snr)
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Failed to probe device by serial number %s", snr)
+                    probed = None
+                if probed is None:
+                    errors["base"] = "device_not_responding"
+                elif probed.get("device_type", "") not in SUPPORTED_DEVICE_TYPES:
+                    # The device is reachable, we just don't know what it is.
+                    # Surface everything the probe learned, in the form and in
+                    # the log, so the user can report it without DEBUG logging.
+                    placeholders = {
+                        "device_type": str(probed.get("device_type") or "?"),
+                        "product_type": str(
+                            probed.get("product_type_str")
+                            or probed.get("product_type")
+                            or "?"
+                        ),
+                        "software_version": str(probed.get("software_version") or "?"),
+                        "radio_mode": str(probed.get("radio_mode") or "?"),
+                    }
+                    _LOGGER.warning(
+                        "Device %s answered the serial-number probe but its device "
+                        "type %s is not supported yet (product type %s, firmware %s, "
+                        "radio mode %s). Please report these values in a GitHub issue.",
+                        snr,
+                        placeholders["device_type"],
+                        placeholders["product_type"],
+                        placeholders["software_version"],
+                        placeholders["radio_mode"],
+                    )
+                    errors["base"] = "device_type_unsupported"
+                else:
+                    self._discovered_devices = [probed]
+                    return await self.async_step_select_devices()
+
+        return self.async_show_form(
+            step_id="add_by_serial",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("serial_number"): vol.All(
+                        vol.Coerce(int), vol.Range(min=1, max=0xFFFFFF)
+                    ),
+                }
+            ),
+            errors=errors,
+            description_placeholders=placeholders,
         )
 
     # ------------------------------------------------------------------
