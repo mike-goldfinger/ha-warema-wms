@@ -27,11 +27,13 @@ DEVICE_TYPE_STRINGS: dict[str, str] = {
     "07": "Remote control (+)",
     "20": "Actuator UP",
     "21": "Plug receiver",
+    "24": "Plug receiver (switching)",
     "25": "Radio motor",
     "26": "Dimmer",
     "28": "Dimmer (smart)",
     "2A": "Radio motor (Lamellendach L60/L70)",
     "2E": "Actuator 230V UP",
+    "30": "Plug receiver (new generation)",
     "31": "Dimmer 0-10 V",
     "63": "Web control",
 }
@@ -39,7 +41,10 @@ DEVICE_TYPE_STRINGS: dict[str, str] = {
 # Device types that drive a cover (blind / shutter / awning / slat roof).
 # 2A is the motor used by the slat-roof (Lamellendach) products SlatRoofL60,
 # SlatRoofL70 and SlatRoofL70Tilting.
-COVER_DEVICE_TYPES: set[str] = {"20", "21", "25", "2A", "2E"}
+# 30 is a newer plug receiver generation (WMS Studio still calls it
+# "Zwischenstecker"); it answers the scan like a 21 and drives an awning in
+# the field (issue #18). Treated like 21 for cover control.
+COVER_DEVICE_TYPES: set[str] = {"20", "21", "25", "2A", "2E", "30"}
 
 # Dimming actuators, exposed as light entities.
 #
@@ -49,15 +54,27 @@ COVER_DEVICE_TYPES: set[str] = {"20", "21", "25", "2A", "2E"}
 # are the other two dimmer variants and use the same encoding.
 LIGHT_DIMMER_DEVICE_TYPES: set[str] = {"26", "28", "31"}
 
+# Switching actuators, exposed as on/off light entities.
+#
+# 24 is the WMS plug receiver that switches a mains load (Zwischenstecker
+# "Licht"/"Steckdose"). It reports a switching product type (16 LightSwitching
+# or similar) and has no intermediate levels: level 100 switches it on, level
+# 0 off, carried by the same command a dimmer uses for its brightness.
+# Confirmed on real hardware in issue #1.
+LIGHT_SWITCH_DEVICE_TYPES: set[str] = {"24"}
+
+# Every device type that ends up as a light entity.
+LIGHT_DEVICE_TYPES: set[str] = LIGHT_DIMMER_DEVICE_TYPES | LIGHT_SWITCH_DEVICE_TYPES
+
 # Every device type this integration creates entities for.  Note this is a
 # strict superset of COVER_DEVICE_TYPES: widening the filter can only ever add
 # devices, never drop one that was accepted before.
-SUPPORTED_DEVICE_TYPES: set[str] = COVER_DEVICE_TYPES | LIGHT_DIMMER_DEVICE_TYPES
+SUPPORTED_DEVICE_TYPES: set[str] = COVER_DEVICE_TYPES | LIGHT_DEVICE_TYPES
 
 # Device types that support slat tilt: the in-wall actuators used for Raffstoren
 # (20/2E) and the slat-roof motor (2A), whose louvres also tilt. Plug receiver
-# (21) and radio motor (25) drive awnings/roller shutters without slats, so tilt
-# is not exposed for them.
+# (21/30) and radio motor (25) drive awnings/roller shutters without slats, so
+# tilt is not exposed for them.
 #
 # Used ONLY as a fallback when we cannot read the per-device productType from
 # Block 37 (e.g. motor asleep during config_flow). The authoritative answer
@@ -81,8 +98,13 @@ def is_cover_device(device_type: str | None) -> bool:
 
 
 def is_light_device(device_type: str | None) -> bool:
-    """Return True when this device type drives a light."""
-    return bool(device_type) and device_type.upper() in LIGHT_DIMMER_DEVICE_TYPES
+    """Return True when this device type drives a light (dimmed or switched)."""
+    return bool(device_type) and device_type.upper() in LIGHT_DEVICE_TYPES
+
+
+def is_switch_light_device(device_type: str | None) -> bool:
+    """Return True when this device type only switches its light on/off."""
+    return bool(device_type) and device_type.upper() in LIGHT_SWITCH_DEVICE_TYPES
 
 
 def is_supported_device(device_type: str | None) -> bool:

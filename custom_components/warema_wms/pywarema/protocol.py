@@ -15,8 +15,11 @@ Position encoding:
   - 0-100% → stored as percent*2 in hex (0x00-0xC8)
 
 Angle encoding:
-  - -100 to +100% → stored as round(pct/100*75)+127 in hex (0x00-0xFE)
-  - WMS_ANGLE constant = 75
+  - -100 to +100% maps linearly onto the byte range [min_angle, max_angle]+127,
+    where degrees = byte - 127. The default min/max is -75/+75 (WMS_ANGLE),
+    matching venetian blinds and in-wall actuators; other actuator families
+    (e.g. the Lamellendach slat-roof motor: -45/+90) pass their own range -
+    see angle_percent_to_hex()/angle_hex_to_percent() and issue #7.
 """
 
 import logging
@@ -148,11 +151,18 @@ def snr_hex_to_num(hex_str: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def pos_percent_to_hex(pos_percent: int) -> str:
+def pos_percent_to_hex(pos_percent: int | None) -> str:
     """Convert position percentage (0-100) to 2-char hex string.
 
-    Stored as percent * 2 in hex.
+    Stored as percent * 2 in hex. ``None`` means "leave the position
+    unchanged" and maps to the 0xFF sentinel - the same value the manufacturer
+    client sends for a settings byte it does not want to touch
+    (``INVALID_MANUAL_CMD_SETTINGS`` in WMS Studio Pro). Needed for
+    position-less actuators (e.g. tilt-only slat roofs), which reject a frame
+    that names a concrete position.
     """
+    if pos_percent is None:
+        return "FF"
     clamped = max(0, min(100, pos_percent))
     return format(clamped * 2, "02X")
 
@@ -175,19 +185,43 @@ def valance_percent_to_hex(valance_percent: int | None) -> str:
     return pos_percent_to_hex(valance_percent)
 
 
-def angle_percent_to_hex(ang_percent: int) -> str:
-    """Convert angle percentage (-100 to +100) to 2-char hex string.
+def angle_percent_to_hex(
+    ang_percent: int, min_angle: int = -WMS_ANGLE, max_angle: int = WMS_ANGLE
+) -> str:
+    """Convert an angle percentage (-100 to +100) to a 2-char hex string.
 
-    Stored as clamp(round(pct/100*WMS_ANGLE), -75, 75) + 127.
+    HA tilt is always -100..+100 regardless of hardware, but the byte's real
+    range (``degrees = byte - 127``) is device-specific: WMS Studio Pro's own
+    parameter-type table defines separate ranges per actuator family, e.g.
+    -75..+75 for venetian blinds (the ``min_angle``/``max_angle`` default here)
+    but -45..+90 for the Lamellendach slat-roof motor (dataTypeId 292,
+    "angle-45+90"). -100% maps to ``min_angle``, +100% to ``max_angle``, so a
+    caller with the motor's real (possibly asymmetric) range gets the correct
+    physical angle instead of an assumed symmetric one. See issue #7.
     """
-    raw = round(ang_percent / 100 * WMS_ANGLE)
-    clamped = max(-WMS_ANGLE, min(WMS_ANGLE, raw))
+    span = (max_angle - min_angle) / 2
+    center = (max_angle + min_angle) / 2
+    raw = round(center + ang_percent / 100 * span)
+    clamped = max(min_angle, min(max_angle, raw))
     return format(clamped + 127, "02X")
 
 
-def angle_hex_to_percent(ang_hex: str) -> int:
-    """Convert 2-char hex angle to percentage (-100 to +100)."""
-    return round((int(ang_hex, 16) - 127) / WMS_ANGLE * 100)
+def angle_hex_to_percent(
+    ang_hex: str, min_angle: int = -WMS_ANGLE, max_angle: int = WMS_ANGLE
+) -> int:
+    """Convert a 2-char hex angle to a percentage (-100 to +100).
+
+    See ``angle_percent_to_hex`` for the meaning of ``min_angle``/``max_angle``.
+    Returns 0 for a degenerate range (``min_angle == max_angle``) instead of
+    raising - a misread or uncalibrated device should not break position
+    polling for that blind.
+    """
+    span = (max_angle - min_angle) / 2
+    if span == 0:
+        return 0
+    center = (max_angle + min_angle) / 2
+    degrees = int(ang_hex, 16) - 127
+    return round((degrees - center) / span * 100)
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +264,18 @@ PRODUCT_TYPES_WITH_OTHER_PARAM_LAYOUT: set[int] = {
     30,  # FloatingOutput
 }
 
+# Slat-roof motors (Lamellendach): verified against WMS Studio Pro's own
+# decrypted PLists (issue #7). common/manualOperation/scene keep the same
+# addresses as the standard layout - only productSettings differs, and is
+# much shorter (no run/calibration times, since there is no position axis).
+# minAngle/maxAngle sit at 463/464 here, not 472/473, and use dataTypeId 292
+# ("angle-45+90": bytes 82..217 = -45°..+90°) instead of the standard layout's
+# dataTypeId 263 ("angle0+80": bytes 127..207 = 0°..+80°).
+PRODUCT_TYPES_WITH_SLAT_ROOF_PARAM_LAYOUT: set[int] = {27, 28, 29}
+
+ADDR_SLAT_ROOF_MIN_ANGLE = 463
+ADDR_SLAT_ROOF_MAX_ANGLE = 464
+
 
 def has_standard_param_layout(product_type: int | None) -> bool:
     """Return True when block 38 uses the address layout mapped out here.
@@ -239,6 +285,11 @@ def has_standard_param_layout(product_type: int | None) -> bool:
     integration had before the check existed.
     """
     return product_type not in PRODUCT_TYPES_WITH_OTHER_PARAM_LAYOUT
+
+
+def has_slat_roof_param_layout(product_type: int | None) -> bool:
+    """Return True for slat-roof motors (Lamellendach), see issue #7."""
+    return product_type in PRODUCT_TYPES_WITH_SLAT_ROOF_PARAM_LAYOUT
 
 
 # Block 38 addresses for the persistent motor parameters.
@@ -263,10 +314,16 @@ ADDR_MAX_ANGLE = 473  # productSettings.maxAngle
 ADDR_TILTING_STEPS = 474  # productSettings.tiltingSteps
 ADDR_MOTOR_ROTATION = 475  # productSettings.motorRotation (0=normal, 1=reversed)
 
-# Block 81: firmware / hardware info (read-only)
+# Block 81: firmware / hardware info (read-only).
+#
+# Verified against WMS Studio Pro's own read (ReadDeviceMetaDataConvBlock81Conv):
+# it reads 32 bytes starting at address 24, with the device-type byte at
+# offset 19 within that buffer and the software version as an 11-char Latin1
+# string at offset 0.
 SW_INFO_BLOCK = 81
-SW_INFO_ADDR = 0
+SW_INFO_ADDR = 24
 SW_INFO_SIZE = 32
+SW_INFO_DEVICE_TYPE_OFFSET = 19
 
 
 def manual_position_to_byte(pct: int) -> int:
@@ -354,8 +411,12 @@ class MotorParameters:
     calibration_up: Optional[int] = None  # seconds, 0..254
     calibration_down: Optional[int] = None  # seconds, 0..254
     tilting_time: Optional[float] = None  # seconds (step 0.2), 0..50.8
-    min_angle: Optional[int] = None  # degrees, -127..+127 (typically -75..0)
-    max_angle: Optional[int] = None  # degrees, -127..+127 (typically 0..+75)
+    # Degrees, -127..+127. The device's real (and possibly asymmetric) tilt
+    # range: -75..+75 for venetian blinds, but e.g. -45..+90 for the
+    # Lamellendach slat-roof motor. Use these (when read) instead of the
+    # WMS_ANGLE default when converting that device's angle to/from percent.
+    min_angle: Optional[int] = None
+    max_angle: Optional[int] = None
     tilting_steps: Optional[int] = None  # count, 0..254
     motor_rotation: Optional[bool] = None  # False=normal, True=reversed
 
@@ -403,10 +464,19 @@ def encode_cmd(cmd: str, snr, params: dict) -> dict:
         # a byte-for-byte identical frame to one that never knew about them.
         valance_1 = params.get("valance_1")
         valance_2 = params.get("valance_2")
+        # The motor's real tilt-angle range, when known (e.g. a slat roof's
+        # -45..+90 instead of the default -75..+75 - see issue #7). Callers
+        # that don't mention it get byte-identical frames to before.
+        min_angle = params.get("min_angle", -WMS_ANGLE)
+        max_angle = params.get("max_angle", WMS_ANGLE)
         # ``ang=None`` masks the slat angle with the same 0xFF sentinel, so a
         # valance-only move leaves the slats where they are. Callers that pass
         # a real angle are unaffected.
-        ang_hex = "FF" if ang is None else angle_percent_to_hex(ang)
+        ang_hex = (
+            "FF"
+            if ang is None
+            else angle_percent_to_hex(ang, min_angle=min_angle, max_angle=max_angle)
+        )
         result["expect"]["msg_type"] = "blindMoveToPosResponse"
         result["expect"]["snr"] = snr_hex
         result["cmd"] = (
@@ -445,6 +515,15 @@ def encode_cmd(cmd: str, snr, params: dict) -> dict:
     elif cmd == "stickGetVersion":
         result["expect"]["msg_type"] = "stickVersion"
         result["cmd"] = "{V}"
+
+    elif cmd == "connectionQuality":
+        # Ask the stick to measure the radio link to one device. The stick
+        # exchanges a probe with the device itself and answers with LQI/RSSI
+        # for both directions (see decode_frame, "{q"). Not an R-frame, so
+        # the per-device key/transmission mode does not apply.
+        result["expect"]["msg_type"] = "connectionQuality"
+        result["expect"]["snr"] = snr_hex
+        result["cmd"] = "{Q" + snr_hex + "}"
 
     elif cmd == "stickSetKey":
         key = params.get("key", "")
@@ -552,6 +631,18 @@ def _wms_trim(data: str) -> str:
     return data.strip()
 
 
+def _weather_half_steps(hex_byte: str) -> Optional[float]:
+    """Decode a weather-broadcast byte that counts in half steps.
+
+    Returns ``raw / 2`` or ``None`` when the byte is ``FF`` (sensor not
+    present) or missing.
+    """
+    hex_byte = hex_byte.upper()
+    if len(hex_byte) != 2 or hex_byte == "FF":
+        return None
+    return int(hex_byte, 16) / 2
+
+
 def decode_frame(raw: str) -> dict:
     """Decode a received WMS frame string into a message dict.
 
@@ -581,6 +672,22 @@ def decode_frame(raw: str) -> dict:
     elif raw.startswith("{v"):
         msg_type = "stickVersion"
         params["stick_version"] = _wms_trim(raw[2:])
+
+    elif raw.startswith("{q"):
+        # Connection quality: {q<SNR6><txLQI2><txRSSI2><rxLQI2><rxRSSI2>}
+        # Raw unsigned bytes exactly as the stick reports them. "tx" is the
+        # stick -> device direction, "rx" is device -> stick.
+        body = raw[2:-1] if raw.endswith("}") else raw[2:]
+        body = body.strip().upper()
+        snr = body[0:6] if len(body) >= 6 else "000000"
+        if len(body) >= 14:
+            msg_type = "connectionQuality"
+            params["tx_lqi"] = int(body[6:8], 16)
+            params["tx_rssi"] = int(body[8:10], 16)
+            params["rx_lqi"] = int(body[10:12], 16)
+            params["rx_rssi"] = int(body[12:14], 16)
+        else:
+            _LOGGER.debug("decode_frame: short connection-quality frame: %s", raw)
 
     elif raw.startswith("{r"):
         # {r<SNR6><TYPE4><PAYLOAD>}
@@ -671,8 +778,9 @@ def decode_frame(raw: str) -> dict:
             # Weather broadcast
             msg_type = "weatherBroadcast"
             params["unknown_1"] = payload[0:2]
-            wind_raw = int(payload[2:4], 16)
-            params["wind"] = wind_raw
+            # Byte 1: wind speed in 0.5 m/s steps (matches WMS Studio, issue #17).
+            # 0xFF = no wind sensor.
+            params["wind"] = _weather_half_steps(payload[2:4])
             lumen_hi = payload[4:6]
             lumen_lo = int(payload[12:14], 16)
             if lumen_hi == "00":
@@ -680,9 +788,18 @@ def decode_frame(raw: str) -> dict:
             else:
                 params["lumen"] = int(lumen_hi, 16) * lumen_lo * 2
             params["unknown_2"] = payload[6:12]
-            params["unknown_3"] = payload[14:16]
-            params["rain"] = payload[16:18] == "C8"
-            params["temp"] = int(payload[18:20], 16) / 2 - 35
+            # Byte 7: battery level in half-percent steps (0xC8 = 100 %,
+            # 0xC0 = 96 %). Verified against the values WMS Studio shows
+            # for the same frames (issue #17).
+            params["battery"] = _weather_half_steps(payload[14:16])
+            # Byte 8: rain flag. 0xFF = station has no rain sensor.
+            rain_raw = payload[16:18].upper()
+            params["rain"] = None if rain_raw in ("FF", "") else rain_raw == "C8"
+            # Byte 9: temperature, 0.5 °C steps with -35 °C offset.
+            # 0xFF = station has no temperature sensor (e.g. Wetterstation eco),
+            # previously decoded as a bogus 92.5 °C (issue #17).
+            temp_raw = _weather_half_steps(payload[18:20])
+            params["temp"] = None if temp_raw is None else temp_raw - 35
             params["unknown_4"] = payload[20:]
 
         elif rcv_type == "8020":

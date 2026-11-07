@@ -19,6 +19,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     LIGHT_LUX,
+    PERCENTAGE,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UnitOfSpeed,
@@ -48,10 +49,21 @@ _SENSOR_DEFS = [
     ("angle", "WMS Angle", None, "mdi:angle-acute"),
 ]
 
-# (attr, name, icon) for read-only motor info sensors (Block 81, diagnostic).
+# (attr, translation_key, icon) for read-only motor info sensors (Block 81,
+# diagnostic).
 _MOTOR_INFO_SENSOR_DEFS = [
-    ("software_version", "Softwareversion", "mdi:chip"),
-    ("device_type_name", "Gerätetyp", "mdi:cog"),
+    ("software_version", "software_version", "mdi:chip"),
+    ("device_type_name", "device_type", "mdi:cog"),
+]
+
+# (attr, translation_key, icon) for the on-demand link measurement, filled by
+# the "Measure connection quality" button. Raw values as the stick reports
+# them; tx = stick -> device, rx = device -> stick.
+_CONNECTION_QUALITY_SENSOR_DEFS = [
+    ("tx_lqi", "connection_tx_lqi", "mdi:signal-cellular-2"),
+    ("tx_rssi", "connection_tx_rssi", "mdi:signal"),
+    ("rx_lqi", "connection_rx_lqi", "mdi:signal-cellular-2"),
+    ("rx_rssi", "connection_rx_rssi", "mdi:signal"),
 ]
 
 # (attr, translation_key, unit, device_class, icon) for weather station readings.
@@ -76,6 +88,13 @@ _WEATHER_SENSOR_DEFS = [
         LIGHT_LUX,
         SensorDeviceClass.ILLUMINANCE,
         "mdi:white-balance-sunny",
+    ),
+    (
+        "battery",
+        "weather_battery",
+        PERCENTAGE,
+        SensorDeviceClass.BATTERY,
+        None,  # let HA pick the level-dependent battery icon
     ),
 ]
 
@@ -112,6 +131,20 @@ async def async_setup_entry(
             )
         )
 
+        # Link measurement results - for every device the stick can address.
+        for attr, translation_key, icon in _CONNECTION_QUALITY_SENSOR_DEFS:
+            entities.append(
+                WaremaConnectionQualitySensor(
+                    coordinator=coordinator,
+                    snr=snr_int,
+                    snr_hex=snr_hex,
+                    device_type_str=device_type_str,
+                    attr=attr,
+                    translation_key=translation_key,
+                    icon=icon,
+                )
+            )
+
         # The remaining sensors describe a cover (position, angle, valances).
         if device_type not in COVER_DEVICE_TYPES:
             continue
@@ -143,7 +176,7 @@ async def async_setup_entry(
         )
 
         # Diagnostic sensors for firmware / hardware info (Block 81)
-        for attr, name, icon in _MOTOR_INFO_SENSOR_DEFS:
+        for attr, translation_key, icon in _MOTOR_INFO_SENSOR_DEFS:
             entities.append(
                 WaremaMotorInfoSensor(
                     coordinator=coordinator,
@@ -152,7 +185,7 @@ async def async_setup_entry(
                     device_type_str=device_type_str,
                     entry_id=entry.entry_id,
                     attr=attr,
-                    name=name,
+                    translation_key=translation_key,
                     icon=icon,
                 )
             )
@@ -268,7 +301,6 @@ class WaremaWmsSensor(
             name=f"{self._device_type_str} {self._snr}",
             manufacturer="Warema",
             model=self._device_type_str,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -308,7 +340,6 @@ class WaremaSnrSensor(SensorEntity):
             name=f"{self._device_type_str} {self._snr}",
             manufacturer="Warema",
             model=self._device_type_str,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -332,7 +363,7 @@ class WaremaWeatherSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         translation_key: str,
         unit: str,
         device_class: SensorDeviceClass,
-        icon: str,
+        icon: str | None,
     ) -> None:
         super().__init__(coordinator, context=snr)
         self._snr = snr
@@ -344,6 +375,8 @@ class WaremaWeatherSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         self._attr_device_class = device_class
         self._attr_icon = icon
         self._attr_unique_id = f"{DOMAIN}_weather_{snr}_{attr}"
+        if device_class is SensorDeviceClass.BATTERY:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def _get_state(self):
         return self.coordinator.weather_data.get(self._snr)
@@ -357,13 +390,16 @@ class WaremaWeatherSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
             name=f"Weather station {self._snr}",
             manufacturer="Warema",
             model="Weather station",
-            via_device=(DOMAIN, self._entry_id),
             serial_number=snr_hex or None,
         )
 
     @property
     def available(self) -> bool:
-        return self._get_state() is not None
+        # A field that decodes to None means the station has no such sensor
+        # (0xFF on the wire). Show the entity as unavailable instead of a
+        # bogus reading such as 92.5 °C (issue #17).
+        state = self._get_state()
+        return state is not None and getattr(state, self._field) is not None
 
     @property
     def native_value(self) -> float | int | None:
@@ -387,7 +423,7 @@ class WaremaMotorInfoSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         device_type_str: str,
         entry_id: str,
         attr: str,
-        name: str,
+        translation_key: str,
         icon: str,
     ) -> None:
         super().__init__(coordinator, context=snr)
@@ -397,7 +433,7 @@ class WaremaMotorInfoSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         self._entry_id = entry_id
         self._attr_key = attr
 
-        self._attr_name = name
+        self._attr_translation_key = translation_key
         self._attr_icon = icon
         self._attr_unique_id = f"{DOMAIN}_{snr_hex}_{attr}"
 
@@ -407,7 +443,6 @@ class WaremaMotorInfoSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
             identifiers={(DOMAIN, self._snr_hex)},
             name=self._device_type_str,
             manufacturer="Warema",
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -420,6 +455,59 @@ class WaremaMotorInfoSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
         if params is None:
             return None
         return getattr(params, self._attr_key, None)
+
+
+class WaremaConnectionQualitySensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
+    """Diagnostic sensor for one value of the last link measurement.
+
+    Unknown until the device's "Measure connection quality" button has been
+    pressed once; keeps the last result afterwards.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: WaremaCoordinator,
+        snr: int,
+        snr_hex: str,
+        device_type_str: str,
+        attr: str,
+        translation_key: str,
+        icon: str,
+    ) -> None:
+        super().__init__(coordinator, context=snr)
+        self._snr = snr
+        self._snr_hex = snr_hex
+        self._device_type_str = device_type_str
+        self._field = attr
+        self._attr_translation_key = translation_key
+        self._attr_icon = icon
+        self._attr_unique_id = f"{DOMAIN}_{snr_hex}_connection_{attr}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._snr_hex)},
+            name=self._device_type_str,
+            manufacturer="Warema",
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        result = self.coordinator.connection_quality.get(self._snr)
+        if result is None:
+            return None
+        return getattr(result, self._field)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        result = self.coordinator.connection_quality.get(self._snr)
+        if result is None:
+            return {}
+        return {"measured_at": result.measured_at}
 
 
 class WaremaProductTypeSensor(SensorEntity):
@@ -459,7 +547,6 @@ class WaremaProductTypeSensor(SensorEntity):
             identifiers={(DOMAIN, self._snr_hex)},
             name=self._device_type_str,
             manufacturer="Warema",
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -517,7 +604,6 @@ class WaremaValanceSensor(CoordinatorEntity[WaremaCoordinator], SensorEntity):
             identifiers={(DOMAIN, self._snr_hex)},
             name=self._device_type_str,
             manufacturer="Warema",
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property

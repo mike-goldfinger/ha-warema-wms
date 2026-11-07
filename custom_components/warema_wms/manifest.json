@@ -7,12 +7,12 @@
   "documentation": "https://github.com/mike-goldfinger/ha-warema-wms",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/mike-goldfinger/ha-warema-wms/issues",
-  "requirements": ["pyserial>=3.5"],
+  "requirements": [],
   "usb": [
     {
       "vid": "0403",
       "pid": "6001"
     }
   ],
-  "version": "1.8.0"
+  "version": "1.9.0-beta.3"
 }

@@ -123,7 +123,6 @@ class WaremaWmsMovingSensor(CoordinatorEntity[WaremaCoordinator], BinarySensorEn
             name=f"{self._device_type_str} {self._snr}",
             manufacturer="Warema",
             model=self._device_type_str,
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property
@@ -165,13 +164,14 @@ class WaremaWeatherRainSensor(CoordinatorEntity[WaremaCoordinator], BinarySensor
             name=f"Weather station {self._snr}",
             manufacturer="Warema",
             model="Weather station",
-            via_device=(DOMAIN, self._entry_id),
             serial_number=snr_hex or None,
         )
 
     @property
     def available(self) -> bool:
-        return self._get_state() is not None
+        # rain is None when the station has no rain sensor (issue #17).
+        state = self._get_state()
+        return state is not None and state.rain is not None
 
     @property
     def is_on(self) -> bool | None:
