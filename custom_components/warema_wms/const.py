@@ -17,6 +17,12 @@ CONF_DEVICES = "devices"
 # "closed" while WMS reports it as 0 (= HA "open"). This is a HA-side display
 # convention only; the physical equivalent is the motor_rotation firmware param.
 OPT_INVERT_POSITION = "invert_position"
+# Per-device tilt inversion, same dict-keyed-by-SNR scheme. Flips which WMS
+# angle end HA shows as "closed". The default already depends on the product
+# (venetian blinds close towards the maximum angle, slat roofs towards the
+# minimum - see cover._tilt_inverted_for); this option is for an installation
+# mounted the other way round. HA-side only, the motor is not touched.
+OPT_INVERT_TILT = "invert_tilt"
 
 # Default values
 DEFAULT_SERIAL_PORT = "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K28M2-if00-port0"
