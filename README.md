@@ -82,6 +82,11 @@ Plug in your Warema WMS USB Stick (FTDI FT232R) and Home Assistant will notify y
 **Step 1: Serial Port Selection**
 - Auto-scans for connected USB sticks
 - Or enter port path manually (e.g., `/dev/ttyUSB0`, `COM5`)
+- Or connect to a stick on another machine via [ser2net](https://github.com/cminyard/ser2net)
+  with `socket://<host>:<port>` (e.g., `socket://192.168.1.2:8638`). Use a raw TCP
+  ser2net connection (no telnet/RFC2217 negotiation) with the port set to
+  125000 baud, 8N1. The integration reconnects automatically if the network
+  link drops.
 
 **Step 2: Network Discovery Method**
 

@@ -44,6 +44,9 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
 )
 
 from .const import (
@@ -145,13 +148,15 @@ def _init_stick_probe(port: str, channel: int, pan_id: str, key: str) -> serial.
     Returns the open serial.Serial object.
     Raises serial.SerialException on failure.
     """
+    # ``port`` is a device path or a pyserial URL (``socket://host:port``).
     ser = serial.serial_for_url(
-        port=port,
+        port,
         baudrate=125000,
         bytesize=serial.EIGHTBITS,
         parity=serial.PARITY_NONE,
         stopbits=serial.STOPBITS_ONE,
         timeout=0.1,
+        write_timeout=1.0,
     )
     import time
 
@@ -543,8 +548,11 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Step 1: Ask for the serial port path.
 
-        Automatically discovers FTDI FT232R devices and offers them in a dropdown,
-        or auto-selects if only one is found.
+        After USB discovery the discovered device is used directly.  In the
+        manual flow the detected FTDI FT232R devices are offered as dropdown
+        suggestions, but the field always accepts a typed value as well, so a
+        stick exposed over the network (``socket://host:port`` via ser2net)
+        can be entered even when unrelated FTDI adapters are plugged in.
         """
         errors: dict[str, str] = {}
 
@@ -556,40 +564,38 @@ class WaremaWmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._user_input[CONF_SERIAL_PORT] = port
                 return await self.async_step_discovery()
 
-        # Auto-discover FTDI devices
-        ftdi_devices = await self.hass.async_add_executor_job(_find_ftdi_devices)
-
-        # If exactly one FTDI device found, auto-select it and continue
-        if len(ftdi_devices) == 1:
-            self._user_input[CONF_SERIAL_PORT] = ftdi_devices[0][0]
+        # USB discovery already identified the stick: no need to ask
+        if self._usb_discovery_info is not None and self._user_input.get(
+            CONF_SERIAL_PORT
+        ):
             return await self.async_step_discovery()
 
-        # Build schema based on devices found
+        # Auto-discover FTDI devices as suggestions
+        ftdi_devices = await self.hass.async_add_executor_job(_find_ftdi_devices)
+
+        default_port = self._user_input.get(CONF_SERIAL_PORT) or (
+            ftdi_devices[0][0] if ftdi_devices else DEFAULT_SERIAL_PORT
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SERIAL_PORT, default=default_port): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": port, "label": f"{desc} ({port})"}
+                            for port, desc in ftdi_devices
+                        ],
+                        custom_value=True,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }
+        )
+
         if ftdi_devices:
-            # Multiple devices found: offer dropdown
-            port_choices = {port: desc for port, desc in ftdi_devices}
-            default_port = ftdi_devices[0][0]
-
-            schema = vol.Schema(
-                {
-                    vol.Required(CONF_SERIAL_PORT, default=default_port): vol.In(
-                        port_choices
-                    ),
-                }
-            )
-
             devices_list = "\n".join(
                 [f"- {desc} ({port})" for port, desc in ftdi_devices]
             )
         else:
-            # No FTDI devices found: show manual text input
-            default_port = self._user_input.get(CONF_SERIAL_PORT, DEFAULT_SERIAL_PORT)
-            schema = vol.Schema(
-                {
-                    vol.Required(CONF_SERIAL_PORT, default=default_port): str,
-                }
-            )
-
             devices_list = "(No devices detected)"
 
         return self.async_show_form(

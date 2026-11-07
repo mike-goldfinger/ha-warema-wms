@@ -262,6 +262,10 @@ class WmsStick:
         self._reader_thread: Optional[threading.Thread] = None
         self._queue_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        # Set by any thread that sees the serial link die (e.g. a failed
+        # write); the reader thread owns the port and performs the reconnect.
+        self._reconnect_event = threading.Event()
+        self._reconnecting = False
 
         self._blinds: Dict[str, Blind] = {}  # keyed by snr_hex
         self._msg_queue: List[WmsMessage] = []
@@ -303,14 +307,7 @@ class WmsStick:
         Raises serial.SerialException on failure.
         """
         _LOGGER.info("WmsStick: Connecting to %s", self.port_path)
-        self._serial = serial.serial_for_url(
-            port=self.port_path,
-            baudrate=125000,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=0.1,
-        )
+        self._serial = self._open_serial()
         self.status = "init"
 
         self._stop_event.clear()
@@ -1900,24 +1897,69 @@ class WmsStick:
     # Serial I/O
     # -----------------------------------------------------------------------
 
-    def _send_frame(self, frame: str) -> None:
-        """Write a frame string to the serial port."""
-        if self._serial and self._serial.is_open:
-            _LOGGER.debug("WMS-SND: %s", frame)
-            self._serial.write(frame.encode("ascii"))
-        else:
-            _LOGGER.error("WmsStick: Cannot send, port not open")
+    def _open_serial(self) -> serial.Serial:
+        """Open the configured port and return the serial object.
 
-    def _reconnect_serial(self) -> None:
+        ``port_path`` is either a device path (``/dev/ttyUSB0``, ``COM5``) or a
+        pyserial URL such as ``socket://host:port`` for a stick exposed over
+        the network via ser2net.  The write timeout keeps a stalled network
+        peer from blocking the queue thread forever.
+
+        Raises serial.SerialException on failure.
+        """
+        return serial.serial_for_url(
+            self.port_path,
+            baudrate=125000,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=0.1,
+            write_timeout=1.0,
+        )
+
+    def _send_frame(self, frame: str) -> bool:
+        """Write a frame string to the serial port.
+
+        Returns True when the frame was handed to the port.  A failed write
+        (dropped ser2net link, stick unplugged) asks the reader thread to
+        reconnect and returns False so the caller can keep the message.
+        """
+        if not (self._serial and self._serial.is_open):
+            _LOGGER.error("WmsStick: Cannot send, port not open")
+            return False
+        _LOGGER.debug("WMS-SND: %s", frame)
+        try:
+            self._serial.write(frame.encode("ascii"))
+        except serial.SerialException as exc:
+            _LOGGER.warning(
+                "WmsStick: Serial write failed, requesting reconnection: %s", exc
+            )
+            self._request_reconnect()
+            return False
+        return True
+
+    def _request_reconnect(self) -> None:
+        """Ask the reader thread to reopen the port (no-op while it already is)."""
+        if not self._reconnecting and not self._stop_event.is_set():
+            self._reconnect_event.set()
+
+    def _reconnect_serial(self) -> bool:
         """Attempt to reconnect to the serial port with retries.
 
         Closes and reopens the serial port up to 5 times with 1 second delay
         between retries. Logs clearly when reconnecting and if all retries fail.
+        Runs on the reader thread only.  Returns True on success; on failure
+        the stick status is set to "error".
         """
         max_retries = 5
         retry_delay = 1.0
+        self._reconnecting = True
+        self._reconnect_event.clear()
 
         for attempt in range(1, max_retries + 1):
+            if self._stop_event.is_set():
+                self._reconnecting = False
+                return False
             try:
                 _LOGGER.info(
                     "WmsStick: Reconnection attempt %d/%d for %s",
@@ -1935,26 +1977,22 @@ class WmsStick:
                             "WmsStick: Error closing port during reconnect: %s", exc
                         )
 
-                # Wait before retrying
-                if attempt < max_retries + 1:
-                    time.sleep(retry_delay)
+                # Give the device / ser2net a moment before reopening
+                time.sleep(retry_delay)
 
                 # Reopen the port
-                self._serial = serial.serial_for_url(
-                    port=self.port_path,
-                    baudrate=125000,
-                    bytesize=serial.EIGHTBITS,
-                    parity=serial.PARITY_NONE,
-                    stopbits=serial.STOPBITS_ONE,
-                    timeout=0.1,
-                )
+                self._serial = self._open_serial()
+                self._recv_buffer = ""
 
                 _LOGGER.info(
                     "WmsStick: Successfully reconnected to %s on attempt %d",
                     self.port_path,
                     attempt,
                 )
-                return  # Success
+                self._reconnecting = False
+                # Resume commands that were held back while the link was down
+                threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
+                return True
 
             except serial.SerialException as exc:
                 _LOGGER.warning(
@@ -1990,11 +2028,19 @@ class WmsStick:
                     self.status = "error"
                     break
 
+        self._reconnecting = False
+        return False
+
     def _reader_loop(self) -> None:
         """Background thread: read from serial port and dispatch frames."""
         _LOGGER.debug("WmsStick: Reader thread started")
         while not self._stop_event.is_set():
             try:
+                if self._reconnect_event.is_set():
+                    # Another thread (a failed write) found the link dead
+                    if not self._reconnect_serial():
+                        break
+                    continue
                 if self._serial and self._serial.is_open:
                     data = self._serial.read(256)
                     if data:
@@ -2009,17 +2055,15 @@ class WmsStick:
                                 self._on_frame_received(frame)
             except serial.SerialException as exc:
                 if not self._stop_event.is_set():
-                    error_msg = str(exc)
-                    # Check for the specific "device disconnected" error
-                    if "readiness to read but returned no data" in error_msg:
-                        _LOGGER.warning(
-                            "WmsStick: Serial port access conflict detected, attempting reconnection: %s",
-                            error_msg,
-                        )
-                        self._reconnect_serial()
-                    else:
-                        _LOGGER.error("WmsStick: Serial read error: %s", exc)
-                        self.status = "error"
+                    # USB: "device reports readiness to read but returned no
+                    # data"; socket://: "socket disconnected" / "read failed".
+                    # Every read error means the link is gone, so try to
+                    # reopen the port in all cases.
+                    _LOGGER.warning(
+                        "WmsStick: Serial read error, attempting reconnection: %s",
+                        exc,
+                    )
+                    if not self._reconnect_serial():
                         break
             except Exception as exc:  # pylint: disable=broad-except
                 if not self._stop_event.is_set():
@@ -2190,6 +2234,10 @@ class WmsStick:
         if self._stop_event.is_set():
             return
 
+        if self._reconnecting or self._reconnect_event.is_set():
+            # Port is being reopened; _reconnect_serial resumes the queue.
+            return
+
         if self._current_msg is not None:
             _LOGGER.debug(
                 "WmsStick: Queue busy, waiting for: %s",
@@ -2218,7 +2266,18 @@ class WmsStick:
         )
         timeout = msg.timeout
 
-        self._send_frame(frame)
+        if not self._send_frame(frame) and (
+            self._reconnecting or self._reconnect_event.is_set()
+        ):
+            # Link is down but a reconnect is under way: keep the message at
+            # the head of the queue; the reconnect restarts queue processing
+            # once the port is back.  Without a reconnect (port gone for
+            # good) the message runs into the normal timeout/retry path below.
+            if self._current_msg is msg:
+                self._current_msg = None
+            with self._queue_lock:
+                self._msg_queue.insert(0, msg)
+            return
 
         # Set timeout - guard the assignment in case the response already
         # consumed the message and cleared the slot before we get here.
