@@ -201,6 +201,14 @@ Each blind appears as a `cover` entity with:
 > actuator hardware drives them. See *Supported Devices* above for the full
 > product-type table.
 
+> **Slat roofs (Lamellendach L60/L70, e.g. Lamaxa):** these motors have no
+> position axis, so the cover has no position slider; *Open*/*Close* and the
+> tilt slider all drive the louvres. 0 % = louvres closed (flat), 100 % =
+> fully open. The louvre range is read from the motor (and retried in the
+> background while the motor is asleep); until then a -45°..+90° range is
+> assumed. If your roof runs the other way round, enable *Invert tilt* under
+> *Options → Display: position / tilt direction*.
+
 ### Valance Entities
 
 An awning's valance (the fabric drop at the front) is a second motorised axis

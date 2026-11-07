@@ -292,6 +292,29 @@ def has_slat_roof_param_layout(product_type: int | None) -> bool:
     return product_type in PRODUCT_TYPES_WITH_SLAT_ROOF_PARAM_LAYOUT
 
 
+# Tilt range a slat-roof motor is assumed to have until its own minAngle/
+# maxAngle have been read: the full span of the louvre-angle data type
+# (bytes 82..217 = -45..+90 degrees). A real motor may stop short of the
+# upper end (issue #7: one L60 reports 82..202), so this is only a fallback -
+# but a far better one than the venetian-blind default of -75..+75, whose
+# lower end (byte 52) lies below the louvre's travel. A move to such a byte is
+# acknowledged by the motor and then silently ignored, which is exactly the
+# "pressed 100 %, nothing happened" behaviour in issue #7.
+SLAT_ROOF_DEFAULT_MIN_ANGLE = -45
+SLAT_ROOF_DEFAULT_MAX_ANGLE = 90
+
+
+def default_angle_range(product_type: int | None) -> tuple[int, int] | None:
+    """Return the tilt range to assume for a product whose range is unread.
+
+    ``None`` means "use the generic WMS_ANGLE default (-75..+75)". Only
+    slat-roof motors get a product-specific fallback - see issue #7.
+    """
+    if has_slat_roof_param_layout(product_type):
+        return (SLAT_ROOF_DEFAULT_MIN_ANGLE, SLAT_ROOF_DEFAULT_MAX_ANGLE)
+    return None
+
+
 # Block 38 addresses for the persistent motor parameters.
 ADDR_COMMON_IS_ABSENT = 1
 ADDR_COMFORT_AUTO_ENABLED = 2  # common.isComfortAutoEnabled

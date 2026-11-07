@@ -59,6 +59,7 @@ from .protocol import (
     SW_INFO_BLOCK,
     SW_INFO_DEVICE_TYPE_OFFSET,
     SW_INFO_SIZE,
+    default_angle_range,
     has_slat_roof_param_layout,
     has_standard_param_layout,
     MotorParameters,
@@ -105,6 +106,11 @@ CMD_SETTINGS = {
 # ~5 s, matching the wake+control time budget WMS Studio Pro's own protocol
 # allots a single command - see issue #7.
 SLAT_ROOF_MOVE_RETRY = 9
+# How many times to retry reading a slat-roof motor's tilt range after the
+# one-shot read at startup failed. A retry is only attempted right after the
+# motor answered a position poll (i.e. while it is awake), so the attempts
+# are spread over minutes, not fired in a burst - see issue #7.
+SLAT_ROOF_RANGE_READ_ATTEMPTS = 20
 DEFAULT_TIMEOUT = 2.0
 DEFAULT_RETRY = -1  # -1 = no retry
 
@@ -181,6 +187,10 @@ class Blind:
     # different, sometimes asymmetric range (e.g. -45..+90). See issue #7.
     min_angle: int | None = None
     max_angle: int | None = None
+    # Bookkeeping for the deferred tilt-range read on slat-roof motors: how
+    # many retries were spent and whether one is currently in flight.
+    angle_range_attempts: int = 0
+    angle_range_pending: bool = False
 
 
 class WmsMessage:
@@ -478,6 +488,10 @@ class WmsStick:
                     valance_2=p.get("valance_2", blind.pos_current.valance_2),
                 )
                 self._update_blind_pos(blind, new_pos)
+                # The motor just answered, so it is awake: a good moment to
+                # fetch its real tilt range if the startup read missed it
+                # (slat-roof motors sleep through most reads) - see issue #7.
+                self._request_slat_roof_angle_range(blind)
 
         msg = WmsMessage("blindGetPos", blind.snr, {})
         if retry is not None:
@@ -573,10 +587,9 @@ class WmsStick:
         # Encode the angle with this motor's real range when known (e.g. a
         # slat roof's -45..+90), so outgoing commands land on the same
         # physical angle that incoming readings are decoded to - see issue #7.
-        if blind.min_angle is not None:
-            msg_params["min_angle"] = blind.min_angle
-        if blind.max_angle is not None:
-            msg_params["max_angle"] = blind.max_angle
+        angle_range = self._angle_range(blind)
+        if angle_range is not None:
+            msg_params["min_angle"], msg_params["max_angle"] = angle_range
         msg = WmsMessage("blindMoveToPos", blind.snr, msg_params)
         msg.on_end = _on_complete
         if has_slat_roof_param_layout(blind.product_type):
@@ -989,37 +1002,122 @@ class WmsStick:
 
         if not done.wait(timeout) or result["failed"]:
             _LOGGER.warning(
-                "WmsStick: _read_slat_roof_angle_range: read failed for %s",
+                "WmsStick: _read_slat_roof_angle_range: read failed for %s "
+                "(motor asleep?) - will retry after its next position reply",
                 blind.snr_hex,
             )
             return None
 
-        # A degenerate range (equal or reversed bounds) would make every
-        # angle scaling divide by zero / go backwards. Leave blind.min_angle/
-        # max_angle at None (default -75..+75) rather than adopting a bad
-        # read - a misread device should fall back, not break tilt scaling.
-        if (
-            params.min_angle is not None
-            and params.max_angle is not None
-            and params.min_angle < params.max_angle
-        ):
-            blind.min_angle = params.min_angle
-            blind.max_angle = params.max_angle
-        else:
-            _LOGGER.warning(
-                "WmsStick: _read_slat_roof_angle_range: implausible range for "
-                "%s (min=%s max=%s), keeping default",
-                blind.snr_hex,
-                params.min_angle,
-                params.max_angle,
-            )
-        _LOGGER.info(
-            "WmsStick: slat-roof angle range for %s: min=%s max=%s",
-            blind.snr_hex,
-            params.min_angle,
-            params.max_angle,
-        )
+        self._adopt_slat_roof_angle_range(blind, params.min_angle, params.max_angle)
         return params
+
+    def _adopt_slat_roof_angle_range(
+        self, blind: "Blind", min_angle: Optional[int], max_angle: Optional[int]
+    ) -> bool:
+        """Store a freshly read tilt range on ``blind`` if it is plausible.
+
+        A degenerate range (equal or reversed bounds) would make every angle
+        scaling divide by zero / go backwards. Leave blind.min_angle/max_angle
+        at None (product fallback, see ``_angle_range``) rather than adopting
+        a bad read - a misread device should fall back, not break tilt
+        scaling. Returns True when the range was adopted.
+        """
+        if min_angle is not None and max_angle is not None and min_angle < max_angle:
+            blind.min_angle = min_angle
+            blind.max_angle = max_angle
+            _LOGGER.info(
+                "WmsStick: slat-roof angle range for %s: min=%s max=%s",
+                blind.snr_hex,
+                min_angle,
+                max_angle,
+            )
+            return True
+        _LOGGER.warning(
+            "WmsStick: _read_slat_roof_angle_range: implausible range for "
+            "%s (min=%s max=%s), keeping default",
+            blind.snr_hex,
+            min_angle,
+            max_angle,
+        )
+        return False
+
+    def _request_slat_roof_angle_range(self, blind: "Blind") -> bool:
+        """Queue a non-blocking read of a slat-roof motor's tilt range.
+
+        The one-shot read at startup (``read_motor_parameters``) often finds
+        the motor asleep and times out, leaving the range unknown for the
+        whole session - every tilt command is then scaled with a guessed
+        range. This is called right after the motor answered a position poll,
+        i.e. while it is awake, and retries up to SLAT_ROOF_RANGE_READ_ATTEMPTS
+        times. It is a no-op for other products, once the range is known, while
+        a read is in flight, and after the retry budget is spent. Returns True
+        when a read was queued. See issue #7.
+        """
+        if not has_slat_roof_param_layout(blind.product_type):
+            return False
+        if blind.min_angle is not None and blind.max_angle is not None:
+            return False
+        if blind.angle_range_pending:
+            return False
+        if blind.angle_range_attempts >= SLAT_ROOF_RANGE_READ_ATTEMPTS:
+            return False
+        blind.angle_range_attempts += 1
+        blind.angle_range_pending = True
+        attempt = blind.angle_range_attempts
+
+        def on_complete(error, msg_sent, msg_rcv):
+            blind.angle_range_pending = False
+            data = b""
+            if error != "timeout" and msg_rcv is not None:
+                data = msg_rcv.get("params", {}).get("data", b"")
+            if len(data) < 2:
+                if attempt >= SLAT_ROOF_RANGE_READ_ATTEMPTS:
+                    _LOGGER.warning(
+                        "WmsStick: tilt range of %s still unreadable after %d "
+                        "attempts, keeping the %s..%s fallback",
+                        blind.snr_hex,
+                        attempt,
+                        *(self._angle_range(blind) or (None, None)),
+                    )
+                else:
+                    _LOGGER.debug(
+                        "WmsStick: tilt range read %d/%d for %s got no answer",
+                        attempt,
+                        SLAT_ROOF_RANGE_READ_ATTEMPTS,
+                        blind.snr_hex,
+                    )
+                return
+            self._adopt_slat_roof_angle_range(
+                blind,
+                product_angle_from_byte(data[0]),
+                product_angle_from_byte(data[1]),
+            )
+
+        _LOGGER.debug(
+            "WmsStick: reading tilt range of %s (attempt %d/%d)",
+            blind.snr_hex,
+            attempt,
+            SLAT_ROOF_RANGE_READ_ATTEMPTS,
+        )
+        self.mb8_read(
+            blind.snr_hex,
+            block=MOTOR_PARAM_BLOCK,
+            addr=ADDR_SLAT_ROOF_MIN_ANGLE,
+            size=2,
+            on_complete=on_complete,
+        )
+        return True
+
+    @staticmethod
+    def _angle_range(blind: "Blind") -> Optional[tuple[int, int]]:
+        """Return the tilt range to scale this blind's angles with.
+
+        The motor's own range once read, else the product's fallback (slat
+        roofs: -45..+90), else ``None`` for the generic -75..+75 default.
+        """
+        if blind.min_angle is not None and blind.max_angle is not None:
+            return (blind.min_angle, blind.max_angle)
+        return default_angle_range(blind.product_type)
 
     def read_block81_info(self, blind_id, timeout: float = 3.0) -> tuple:
         """Read firmware version and device type from Block 81 (read-only).
@@ -1697,15 +1795,17 @@ class WmsStick:
         angle = params.get("angle")
         if angle is None:
             return None
-        if blind.min_angle is None or blind.max_angle is None:
+        angle_range = WmsStick._angle_range(blind)
+        if angle_range is None:
             return angle
         angle_raw = params.get("angle_raw")
         if angle_raw is None:
             return angle
+        min_angle, max_angle = angle_range
         return angle_hex_to_percent(
             format(angle_raw, "02X"),
-            min_angle=blind.min_angle,
-            max_angle=blind.max_angle,
+            min_angle=min_angle,
+            max_angle=max_angle,
         )
 
     def _get_blind(self, blind_id) -> Optional[Blind]:

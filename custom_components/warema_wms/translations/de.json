@@ -11,20 +11,22 @@
         }
       },
       "device_settings": {
-        "title": "Warema WMS – Anzeige: Positionsrichtung",
+        "title": "Warema WMS – Anzeige: Positions-/Neigungsrichtung",
         "description": "Bitte die Store auswählen, deren Anzeige-Richtung in Home Assistant geändert werden soll. Dies ist eine reine Anzeige-Einstellung und ändert den Motor nicht.",
         "data": {
           "device": "Gerät"
         }
       },
       "device_invert": {
-        "title": "Warema WMS – Positionsrichtung",
-        "description": "Kehrt die Auf/Zu-Richtung dieser Store in Home Assistant um.\n\nNützlich für Markisen: standardmäßig wird eine vollständig eingefahrene Markise als „offen“ angezeigt, weil WMS sie als Position 0 meldet. Mit aktivierter Umkehr wird die eingefahrene/Grundposition als „geschlossen“ und das Ausfahren (Beschattung) als „offen“ angezeigt; die Auf/Zu-Befehle passen entsprechend.\n\nDies ist nur eine Anzeige-Einstellung in Home Assistant und ändert den Motor nicht. Um stattdessen den Motor physisch umzudrehen (wirkt auch auf den Handsender), „Motorparameter konfigurieren → Motordrehrichtung“ verwenden.",
+        "title": "Warema WMS – Positions- und Neigungsrichtung",
+        "description": "Kehrt die Auf/Zu-Richtung dieser Store in Home Assistant um.\n\nNützlich für Markisen: standardmäßig wird eine vollständig eingefahrene Markise als „offen“ angezeigt, weil WMS sie als Position 0 meldet. Mit aktivierter Umkehr wird die eingefahrene/Grundposition als „geschlossen“ und das Ausfahren (Beschattung) als „offen“ angezeigt; die Auf/Zu-Befehle passen entsprechend.\n\nDies ist nur eine Anzeige-Einstellung in Home Assistant und ändert den Motor nicht. Um stattdessen den Motor physisch umzudrehen (wirkt auch auf den Handsender), „Motorparameter konfigurieren → Motordrehrichtung“ verwenden.\n\nDie Neigungsrichtung wird pro Produkt gewählt: Raffstoren schließen zum maximalen Lamellenwinkel hin, ein Lamellendach zum minimalen. „Neigung invertieren“ kehrt diese Vorgabe um, falls die Anlage andersherum montiert ist.",
         "data": {
-          "invert_position": "Position invertieren (Markisen-Modus)"
+          "invert_position": "Position invertieren (Markisen-Modus)",
+          "invert_tilt": "Neigung invertieren"
         },
         "data_description": {
-          "invert_position": "Wenn aktiv: eingefahren = geschlossen, ausgefahren = offen."
+          "invert_position": "Wenn aktiv: eingefahren = geschlossen, ausgefahren = offen.",
+          "invert_tilt": "Wenn aktiv: die Neigungsachse läuft andersherum als die Produkt-Vorgabe."
         }
       },
       "select_devices": {

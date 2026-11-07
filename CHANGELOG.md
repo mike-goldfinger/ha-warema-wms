@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- **"Invert tilt" per device.** The options menu's display-direction step now
+  also offers *Invert tilt*. The tilt direction is chosen per product
+  (venetian blinds close towards the maximum slat angle, a slat roof towards
+  the minimum); this flips that default for an installation mounted the
+  other way round. HA-side only, the motor is not touched. (issue #7)
 - **Support for serial ports via sockets.** It is now possible to connect to a
   WMS stick that is exposed to the network via `ser2net` or similar solutions,
   by entering `socket://<host>:<port>` as the serial port. A dropped network
@@ -47,6 +52,25 @@ All notable changes to this project will be documented in this file.
   diagnostic `sensor` entity. (issue #17)
 
 ### Fixed
+- **Slat-roof tilt ran the wrong way and "100 %" was silently ignored.**
+  Three findings from the v1.9.0-beta.3 test on a Lamaxa L50 (issue #7):
+  - HA "0 % tilt" drove the roof fully *open* and "100 %" fully closed: a
+    slat roof is closed (louvres flat) at its *minimum* angle, the opposite
+    of a venetian blind. Slat roofs now map HA 0 % = closed = minimum angle,
+    and the cover's open/close buttons drive the louvres instead of sending
+    a position command the motor has no axis for (which closed the roof on
+    "open"). The position slider is no longer offered on such a cover.
+  - When the motor's own tilt range could not be read (the one-shot read at
+    startup usually finds a slat-roof motor asleep), every tilt command fell
+    back to the venetian-blind range of -75..+75. "100 %" then became a
+    target below the louvres' travel, which the motor acknowledges and does
+    not execute - the "pressed 100 %, no reaction" in the test log. Slat
+    roofs now fall back to the louvre range of -45..+90 instead, so every
+    target lies inside the travel.
+  - The tilt-range read is now retried in the background right after the
+    motor answered a position poll (i.e. while it is awake) until it
+    succeeds, instead of being given up for the whole session. The log line
+    `slat-roof angle range for <SNR>: min=… max=…` shows when it did.
 - **"Gerätetyp" and "Softwareversion" diagnostic sensors are now translated.**
   Their names were hard-coded in German while every other entity follows the
   Home Assistant language; they now read "Device type" / "Software version"

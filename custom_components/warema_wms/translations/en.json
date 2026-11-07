@@ -97,20 +97,22 @@
         }
       },
       "device_settings": {
-        "title": "Warema WMS – Display: position direction",
+        "title": "Warema WMS – Display: position / tilt direction",
         "description": "Pick the cover whose Home Assistant display direction you want to change. This is a display-only setting and does not change the motor.",
         "data": {
           "device": "Device"
         }
       },
       "device_invert": {
-        "title": "Warema WMS – Position direction",
-        "description": "Invert the open/closed direction for this cover in Home Assistant.\n\nUse this for awnings (Markisen): by default a fully retracted awning reads as \"open\" because WMS reports it as position 0. Enabling inversion makes the retracted/home position read as \"closed\" and extending (shading) read as \"open\", with open/close commands matching.\n\nThis is a Home Assistant display setting only and does not touch the motor. To physically reverse the motor instead (also affects the handheld remote), use \"Configure motor firmware parameters → motor rotation direction\".",
+        "title": "Warema WMS – Position and tilt direction",
+        "description": "Invert the open/closed direction for this cover in Home Assistant.\n\nUse this for awnings (Markisen): by default a fully retracted awning reads as \"open\" because WMS reports it as position 0. Enabling inversion makes the retracted/home position read as \"closed\" and extending (shading) read as \"open\", with open/close commands matching.\n\nThis is a Home Assistant display setting only and does not touch the motor. To physically reverse the motor instead (also affects the handheld remote), use \"Configure motor firmware parameters → motor rotation direction\".\n\nThe tilt direction is chosen per product: venetian blinds close towards the maximum slat angle, a slat roof (Lamellendach) closes towards the minimum. \"Invert tilt\" flips that default for an installation mounted the other way round.",
         "data": {
-          "invert_position": "Invert position (awning mode)"
+          "invert_position": "Invert position (awning mode)",
+          "invert_tilt": "Invert tilt"
         },
         "data_description": {
-          "invert_position": "When enabled: retracted = closed, extended = open."
+          "invert_position": "When enabled: retracted = closed, extended = open.",
+          "invert_tilt": "When enabled: the tilt axis runs the other way round than the product default."
         }
       },
       "select_devices": {

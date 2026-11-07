@@ -42,6 +42,7 @@ from .const import (
     CONF_DEVICES,
     DOMAIN,
     OPT_INVERT_POSITION,
+    OPT_INVERT_TILT,
     PRODUCT_TYPE_TO_DEVICE_CLASS,
     TILT_DEVICE_TYPES,
 )
@@ -71,6 +72,8 @@ async def async_setup_entry(
 
     # Per-device position inversion, keyed by string SNR (see OPT_INVERT_POSITION).
     invert_map = entry.options.get(OPT_INVERT_POSITION, {})
+    # Per-device tilt inversion, same key scheme (see OPT_INVERT_TILT).
+    invert_tilt_map = entry.options.get(OPT_INVERT_TILT, {})
 
     # Get devices from config entry data
     devices = entry.data.get(CONF_DEVICES, [])
@@ -101,6 +104,7 @@ async def async_setup_entry(
                         product_type=device.get("product_type"),
                         is_with_blinds=device.get("is_with_blinds"),
                         invert=bool(invert_map.get(str(snr_int), False)),
+                        invert_tilt=bool(invert_tilt_map.get(str(snr_int), False)),
                     )
                 )
                 cover_meta[snr_int] = {
@@ -133,6 +137,7 @@ async def async_setup_entry(
                         product_type=device.get("product_type"),
                         is_with_blinds=device.get("is_with_blinds"),
                         invert=bool(invert_map.get(str(snr), False)),
+                        invert_tilt=bool(invert_tilt_map.get(str(snr), False)),
                     )
                 )
                 cover_meta[snr] = {
@@ -252,30 +257,57 @@ def _ha_pos_to_wms(ha_pos: int, invert: bool = False) -> int:
     return ha if invert else 100 - ha
 
 
-def _wms_angle_to_ha_tilt(wms_angle: int) -> int:
+def _wms_angle_to_ha_tilt(wms_angle: int, invert: bool = False) -> int:
     """Convert WMS angle (-100 to +100) to HA tilt (0-100).
 
-    WMS -100 (fully inward/closed) → HA 100
-    WMS 0 (horizontal) → HA 50
-    WMS +100 (fully outward/open) → HA 0
+    Default (venetian blinds):
+      WMS -100 (fully inward/closed) → HA 100
+      WMS 0 (horizontal) → HA 50
+      WMS +100 (fully outward/open) → HA 0
 
     Inverted to match HA convention: 0=closed, 100=open.
+
+    ``invert=True`` mirrors the mapping (WMS -100 → HA 0, WMS +100 → HA 100)
+    for hardware whose closed position is the *minimum* angle, e.g. a slat
+    roof whose louvres lie flat (closed) at the lower end of their travel -
+    see ``_tilt_inverted_for`` and issue #7.
     """
     clamped = max(-100, min(100, wms_angle))
+    if invert:
+        return round((clamped + 100) / 2)
     return round((100 - clamped) / 2)
 
 
-def _ha_tilt_to_wms_angle(ha_tilt: int) -> int:
+def _ha_tilt_to_wms_angle(ha_tilt: int, invert: bool = False) -> int:
     """Convert HA tilt (0-100) to WMS angle (-100 to +100).
 
-    HA 0 (closed) → WMS +100
-    HA 50 (horizontal) → WMS 0
-    HA 100 (open) → WMS -100
+    Default (venetian blinds):
+      HA 0 (closed) → WMS +100
+      HA 50 (horizontal) → WMS 0
+      HA 100 (open) → WMS -100
 
     Inverted to match HA convention: 0=closed, 100=open.
+    ``invert=True`` mirrors the mapping (HA 0 → WMS -100, HA 100 → WMS +100),
+    see ``_wms_angle_to_ha_tilt``.
     """
     clamped = max(0, min(100, ha_tilt))
+    if invert:
+        return round(clamped * 2 - 100)
     return round((100 - clamped) * 2 - 100)
+
+
+def _tilt_inverted_for(product_type: int | None, invert_tilt: bool) -> bool:
+    """Decide the direction of the HA tilt axis for a device.
+
+    Venetian blinds close towards the *maximum* WMS angle, which the default
+    mapping encodes. A slat roof (Lamellendach) is the other way round: its
+    louvres are closed (flat) at the motor's *minimum* angle and open towards
+    the maximum - confirmed on hardware in issue #7, where HA "0 % tilt" drove
+    the roof fully open. So slat roofs invert by default; the per-device
+    OPT_INVERT_TILT option flips whichever default applies, for an
+    installation mounted the other way round.
+    """
+    return has_slat_roof_param_layout(product_type) != bool(invert_tilt)
 
 
 class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
@@ -295,6 +327,7 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         product_type: int | None = None,
         is_with_blinds: bool | None = None,
         invert: bool = False,
+        invert_tilt: bool = False,
     ) -> None:
         """Initialize the cover entity."""
         super().__init__(coordinator, context=snr)
@@ -328,12 +361,17 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         # an unknown one there is worth a warning and a refresh attempt -
         # see issue #7.
         self._has_position_axis = not has_slat_roof_param_layout(product_type)
+        # Direction of the HA tilt axis (which WMS angle end is "closed"); see
+        # _tilt_inverted_for.
+        self._tilt_inverted = _tilt_inverted_for(product_type, invert_tilt)
         features = (
-            CoverEntityFeature.OPEN
-            | CoverEntityFeature.CLOSE
-            | CoverEntityFeature.STOP
-            | CoverEntityFeature.SET_POSITION
+            CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
         )
+        # A position slider makes no sense on a cover without a position
+        # axis; its open/close buttons drive the tilt instead (see
+        # async_open_cover).
+        if self._has_position_axis:
+            features |= CoverEntityFeature.SET_POSITION
         if self._supports_tilt:
             features |= (
                 CoverEntityFeature.OPEN_TILT
@@ -395,7 +433,7 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         state = self._get_blind_state()
         if not state:
             return None
-        return _wms_angle_to_ha_tilt(state.angle)
+        return _wms_angle_to_ha_tilt(state.angle, self._tilt_inverted)
 
     @property
     def is_closed(self) -> bool | None:
@@ -404,6 +442,10 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         "Closed" is HA position 0. Normally that maps to WMS 100; when this
         device is inverted it maps to WMS 0 (e.g. a retracted awning).
         """
+        if not self._has_position_axis:
+            # Tilt-only cover (slat roof): closed means louvres closed.
+            tilt = self.current_cover_tilt_position
+            return None if tilt is None else tilt <= 0
         state = self._get_blind_state()
         if not state or state.position < 0:
             return None
@@ -430,6 +472,15 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         HA "open" = extended = WMS position=100, so route to the opposite
         coordinator command.
         """
+        if not self._has_position_axis:
+            # Tilt-only cover (slat roof): "open" opens the louvres. Routing
+            # through the position command would send a position byte the
+            # motor has no axis for and an angle in the venetian-blind
+            # direction, i.e. close the roof - see issue #7.
+            self._command_is_opening = True
+            self._command_is_closing = False
+            await self.async_open_cover_tilt()
+            return
         _LOGGER.debug(
             "WaremaCover: open_cover SNR=%d (%s) invert=%s",
             self._snr,
@@ -454,6 +505,12 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         Normally WMS position=100; for an inverted device HA "closed" =
         retracted = WMS position=0, so route to the opposite command.
         """
+        if not self._has_position_axis:
+            # Tilt-only cover (slat roof): "close" closes the louvres.
+            self._command_is_opening = False
+            self._command_is_closing = True
+            await self.async_close_cover_tilt()
+            return
         _LOGGER.debug(
             "WaremaCover: close_cover SNR=%d (%s) invert=%s",
             self._snr,
@@ -557,38 +614,43 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         return None
 
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:
-        """Open the tilt (slats to WMS angle -100), position unchanged.
+        """Open the tilt (HA tilt 100), position unchanged.
 
         Mirrors the manufacturer's vnBlindSetPosition: the angle is sent via a
         blindMoveToPos command carrying the *current* position, so only the
-        slats turn while the blind stays where it is.
+        slats turn while the blind stays where it is. Which WMS angle end is
+        "open" depends on the hardware - see _tilt_inverted_for.
         """
         position = self._position_for_tilt_command()
+        wms_angle = _ha_tilt_to_wms_angle(100, self._tilt_inverted)
 
         _LOGGER.debug(
-            "WaremaCover: open_cover_tilt SNR=%d (%s) pos=%s angle=-100",
+            "WaremaCover: open_cover_tilt SNR=%d (%s) pos=%s angle=%+d",
             self._snr,
             self._snr_hex,
             position,
+            wms_angle,
         )
         await self.hass.async_add_executor_job(
-            self.coordinator.set_position, self._snr, position, -100
+            self.coordinator.set_position, self._snr, position, wms_angle
         )
         self._command_moving = True
         self.async_write_ha_state()
 
     async def async_close_cover_tilt(self, **kwargs: Any) -> None:
-        """Close the tilt (slats to WMS angle +100), position unchanged."""
+        """Close the tilt (HA tilt 0), position unchanged."""
         position = self._position_for_tilt_command()
+        wms_angle = _ha_tilt_to_wms_angle(0, self._tilt_inverted)
 
         _LOGGER.debug(
-            "WaremaCover: close_cover_tilt SNR=%d (%s) pos=%s angle=+100",
+            "WaremaCover: close_cover_tilt SNR=%d (%s) pos=%s angle=%+d",
             self._snr,
             self._snr_hex,
             position,
+            wms_angle,
         )
         await self.hass.async_add_executor_job(
-            self.coordinator.set_position, self._snr, position, 100
+            self.coordinator.set_position, self._snr, position, wms_angle
         )
         self._command_moving = True
         self.async_write_ha_state()
@@ -601,16 +663,18 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
         vnBlindSetPosition / vnBlindSlatTiltOver behaviour.
         """
         ha_tilt = kwargs[ATTR_TILT_POSITION]
-        wms_angle = _ha_tilt_to_wms_angle(ha_tilt)
+        wms_angle = _ha_tilt_to_wms_angle(ha_tilt, self._tilt_inverted)
         position = self._position_for_tilt_command()
 
         _LOGGER.debug(
-            "WaremaCover: set_cover_tilt_position SNR=%d (%s) ha_tilt=%d wms_angle=%d pos=%s",
+            "WaremaCover: set_cover_tilt_position SNR=%d (%s) ha_tilt=%d "
+            "wms_angle=%d pos=%s tilt_inverted=%s",
             self._snr,
             self._snr_hex,
             ha_tilt,
             wms_angle,
             position,
+            self._tilt_inverted,
         )
         await self.hass.async_add_executor_job(
             self.coordinator.set_position, self._snr, position, wms_angle
@@ -648,6 +712,7 @@ class WaremaCover(CoordinatorEntity[WaremaCoordinator], CoverEntity):
                 else product_type_name(self._product_type)
             ),
             "is_with_blinds": self._is_with_blinds,
+            "tilt_inverted": self._tilt_inverted,
             "wms_position": state.position if state else -1,
             "wms_angle": state.angle if state else 0,
             "moving": state.moving if state else False,

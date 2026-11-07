@@ -66,6 +66,7 @@ from .const import (
     DISCOVERY_MODE_WANDSENDER,
     DOMAIN,
     OPT_INVERT_POSITION,
+    OPT_INVERT_TILT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1370,25 +1371,32 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
     async def async_step_device_invert(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Toggle HA-side position inversion for the chosen device."""
+        """Toggle HA-side position / tilt inversion for the chosen device."""
         snr_key = str(self._ds_selected_snr)
         invert_map = dict(self.config_entry.options.get(OPT_INVERT_POSITION, {}))
+        invert_tilt_map = dict(self.config_entry.options.get(OPT_INVERT_TILT, {}))
 
         if user_input is not None:
             invert_map[snr_key] = bool(user_input.get(OPT_INVERT_POSITION, False))
+            invert_tilt_map[snr_key] = bool(user_input.get(OPT_INVERT_TILT, False))
             new_options = {
                 **self.config_entry.options,
                 OPT_INVERT_POSITION: invert_map,
+                OPT_INVERT_TILT: invert_tilt_map,
             }
             # Persisting the options fires the update listener, which reloads the
             # integration so the cover picks up the new direction.
             return self.async_create_entry(title="", data=new_options)
 
         current = bool(invert_map.get(snr_key, False))
+        current_tilt = bool(invert_tilt_map.get(snr_key, False))
         return self.async_show_form(
             step_id="device_invert",
             data_schema=vol.Schema(
-                {vol.Optional(OPT_INVERT_POSITION, default=current): bool}
+                {
+                    vol.Optional(OPT_INVERT_POSITION, default=current): bool,
+                    vol.Optional(OPT_INVERT_TILT, default=current_tilt): bool,
+                }
             ),
         )
 
