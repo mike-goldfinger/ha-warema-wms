@@ -122,6 +122,15 @@ PROBE_RADIO_MODES = ("11", "16", "01", DEFAULT_RADIO_MODE)
 # Devices that never joined a network listen on the broadcast PAN with the factory key.
 BROADCAST_PAN_ID = "FFFF"
 BROADCAST_PAN_RADIO_MODES = ("01", DEFAULT_RADIO_MODE)
+# Frames sent per radio mode when probing a device by serial number. Until
+# now the probe sent a single frame per mode and waited 2 s. Issue #7's logs
+# show that the slat-roof motor of the same installation typically ignores
+# the first frame after an idle period and answers the second or third; a
+# light from the same family will not behave better, so one frame per mode
+# says very little. Six frames at 0.5 s make the probe about as persistent as
+# a tilt command - see issue #8.
+PROBE_FRAME_TIMEOUT = 0.5
+PROBE_FRAME_RETRY = 5
 
 # Retry count for background position polls (pos-upd / watch-moving). The full
 # CMD_SETTINGS retry (5) is meant for one-shot user queries; a periodic 5 s poll
@@ -729,6 +738,8 @@ class WmsStick:
         addr: int,
         size: int,
         on_complete: Optional[Callable] = None,
+        retry: Optional[int] = None,
+        timeout: Optional[float] = None,
     ) -> None:
         """Read raw bytes from a parameter block on a device.
 
@@ -742,6 +753,9 @@ class WmsStick:
             addr: Block address (0-65535).
             size: Number of bytes to read (1-255).
             on_complete: Optional callback(error, msg_sent, msg_rcv).
+            retry: Optional override of the per-message retry count (the
+                default for mb8Read is no retry).
+            timeout: Optional override of the per-frame answer window.
         """
         blind = self._get_blind(blind_id)
         if not blind:
@@ -753,6 +767,10 @@ class WmsStick:
         msg = WmsMessage(
             "mb8Read", blind.snr, {"block": block, "addr": addr, "size": size}
         )
+        if retry is not None:
+            msg.retry = retry
+        if timeout is not None:
+            msg.timeout = timeout
         if on_complete:
             msg.on_end = on_complete
         self._enqueue(msg)
@@ -1141,7 +1159,9 @@ class WmsStick:
             return (blind.min_angle, blind.max_angle)
         return default_angle_range(blind.product_type)
 
-    def read_block81_info(self, blind_id, timeout: float = 3.0) -> tuple:
+    def read_block81_info(
+        self, blind_id, timeout: float = 3.0, retry: Optional[int] = None
+    ) -> tuple:
         """Read firmware version and device type from Block 81 (read-only).
 
         Returns a ``(software_version, device_type_name)`` tuple.  Both values
@@ -1162,6 +1182,8 @@ class WmsStick:
             addr=SW_INFO_ADDR,
             size=SW_INFO_SIZE,
             timeout=timeout,
+            retry=retry,
+            frame_timeout=PROBE_FRAME_TIMEOUT if retry else None,
         )
         if not data:
             _LOGGER.info(
@@ -1210,17 +1232,24 @@ class WmsStick:
 
         def answers(radio_mode: str) -> bool:
             blind.radio_mode = radio_mode
+            # Several frames per mode: a device that duty-cycles its receiver
+            # (issue #7's slat-roof motor misses most first frames) would
+            # otherwise look silent on the one mode it does listen to.
             data = self._mb8_read_sync(
                 blind.snr_hex,
                 block=SW_INFO_BLOCK,
                 addr=SW_INFO_ADDR,
                 size=SW_INFO_SIZE,
+                retry=PROBE_FRAME_RETRY,
+                frame_timeout=PROBE_FRAME_TIMEOUT,
             )
             _LOGGER.info(
-                "probe_radio_mode %s: R%s -> %s",
+                "probe_radio_mode %s: R%s -> %s (%d frames, %.1f s each)",
                 blind.snr_hex,
                 radio_mode,
                 "answer" if data else "no answer",
+                PROBE_FRAME_RETRY + 1,
+                PROBE_FRAME_TIMEOUT,
             )
             return bool(data)
 
@@ -1264,9 +1293,21 @@ class WmsStick:
             _LOGGER.warning("WmsStick: no ack for PAN switch to %s", pan_id)
 
     def _mb8_read_sync(
-        self, snr_hex, block: int, addr: int, size: int, timeout: float = 3.0
+        self,
+        snr_hex,
+        block: int,
+        addr: int,
+        size: int,
+        timeout: float = 3.0,
+        retry: Optional[int] = None,
+        frame_timeout: Optional[float] = None,
     ) -> Optional[bytes]:
-        """Synchronous MB8 block read - returns ``bytes`` on success, None on timeout."""
+        """Synchronous MB8 block read - returns ``bytes`` on success, None on timeout.
+
+        ``retry``/``frame_timeout`` repeat the frame like a user command does
+        (see ``mb8_read``); ``timeout`` is then stretched to cover every
+        attempt, so a caller only has to size the per-frame window.
+        """
         done = threading.Event()
         holder: dict = {"data": None, "error": None}
 
@@ -1277,7 +1318,19 @@ class WmsStick:
                 holder["data"] = msg_rcv["params"].get("data", b"")
             done.set()
 
-        self.mb8_read(snr_hex, block=block, addr=addr, size=size, on_complete=cb)
+        if retry is not None and retry > 0:
+            per_frame = frame_timeout if frame_timeout is not None else DEFAULT_TIMEOUT
+            timeout = max(timeout, (retry + 1) * (per_frame + DELAY_MSG_PROC) + 1.0)
+
+        self.mb8_read(
+            snr_hex,
+            block=block,
+            addr=addr,
+            size=size,
+            on_complete=cb,
+            retry=retry,
+            timeout=frame_timeout,
+        )
         if not done.wait(timeout):
             _LOGGER.warning(
                 "mb8_read_sync: timeout block=%d addr=%d size=%d", block, addr, size
@@ -1638,7 +1691,7 @@ class WmsStick:
         return True
 
     def read_product_info(
-        self, blind_id, timeout: float = 3.0
+        self, blind_id, timeout: float = 3.0, retry: Optional[int] = None
     ) -> Optional[tuple[int, bool]]:
         """Read the motor's product type from Block 37 (productParameters).
 
@@ -1665,6 +1718,8 @@ class WmsStick:
             addr=PRODUCT_ADDR,
             size=4,
             timeout=timeout,
+            retry=retry,
+            frame_timeout=PROBE_FRAME_TIMEOUT if retry else None,
         )
         if data is None or len(data) < 3:
             _LOGGER.info(

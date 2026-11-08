@@ -8,6 +8,7 @@ to Home Assistant entities via DataUpdateCoordinator pattern.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 from dataclasses import dataclass
@@ -416,6 +417,9 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
         if not self.stick:
             return None
 
+        # Lazy import, like WmsStick itself (pyserial is only needed at runtime).
+        from .pywarema.stick import PROBE_FRAME_RETRY
+
         async with self._discovery_lock:
             # blind_add() returns the existing Blind instead of duplicating it
             # if this SNR is already registered (e.g. a device added earlier
@@ -433,15 +437,22 @@ class WaremaCoordinator(DataUpdateCoordinator[dict[int, BlindState]]):
                 )
                 if radio_mode is None or pan_id != self.stick.pan_id:
                     return None
+                # The device answered the probe, but one that duty-cycles its
+                # receiver may miss the very next frame again - repeat these
+                # two reads like the probe did (see PROBE_FRAME_RETRY).
                 sw_ver, dev_type_hex = await self.hass.async_add_executor_job(
-                    self.stick.read_block81_info, snr
+                    functools.partial(
+                        self.stick.read_block81_info, snr, retry=PROBE_FRAME_RETRY
+                    )
                 )
                 if dev_type_hex is None:
                     return None
                 device_type = dev_type_hex.removeprefix("0x").upper().zfill(2)
 
                 product_info = await self.hass.async_add_executor_job(
-                    self.stick.read_product_info, snr
+                    functools.partial(
+                        self.stick.read_product_info, snr, retry=PROBE_FRAME_RETRY
+                    )
                 )
                 product_type, is_with_blinds = (
                     product_info if product_info is not None else (None, None)
