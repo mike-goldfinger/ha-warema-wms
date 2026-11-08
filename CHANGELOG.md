@@ -71,6 +71,22 @@ All notable changes to this project will be documented in this file.
     motor answered a position poll (i.e. while it is awake) until it
     succeeds, instead of being given up for the whole session. The log line
     `slat-roof angle range for <SNR>: min=… max=…` shows when it did.
+- **A new tilt command no longer lets the previous one fire afterwards.**
+  Tapping the tilt slider (or Stop) while the motor had not yet answered the
+  previous command only replaced commands still waiting in the queue; the
+  command already *in flight* kept retrying, and each retry was appended
+  behind everything else - so the motor received the old target after the
+  new one, stopped and set off again. Reported on a Lamaxa L50 with
+  v1.9.0-beta.5 as "stopped responding and executed the stuff later" and
+  "an intermediate stop before continuing" (issue #7). Now a newer command
+  for the same device marks the in-flight move as superseded (no retry, a
+  late reply is ignored), a retry of a user command keeps its place at the
+  head of the queue instead of queuing behind the background position
+  polls, and Stop is queued ahead of those polls as well. The same log shows
+  the roof motor ignoring every frame for about 3 s in the middle of each
+  travel and once for 13 s right after one, while the other devices kept
+  answering; a tilt command to a slat roof is therefore now retried for up to
+  about 15 s instead of 5 s, so a single tap outlasts such a gap.
 - **"Gerätetyp" and "Softwareversion" diagnostic sensors are now translated.**
   Their names were hard-coded in German while every other entity follows the
   Home Assistant language; they now read "Device type" / "Software version"

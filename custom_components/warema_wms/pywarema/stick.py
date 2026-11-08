@@ -98,14 +98,15 @@ CMD_SETTINGS = {
 }
 
 # blindMoveToPos retries used for tilt-only motors (slat roofs), which have no
-# position axis and, per issue #7's logs, go back to sleep noticeably more
-# eagerly than the geared actuators the default retry count was tuned for -
-# a get-position poll on one has timed out mere seconds after it stopped
-# moving. The default 4 attempts (retry=3) at 0.5 s only cover ~2 s, too
-# short a window to catch such a motor waking back up; this raises it to
-# ~5 s, matching the wake+control time budget WMS Studio Pro's own protocol
-# allots a single command - see issue #7.
-SLAT_ROOF_MOVE_RETRY = 9
+# position axis and, per issue #7's logs, stop listening for seconds at a
+# time: the v1.9.0-beta.5 log of a Lamaxa L50 shows the motor deaf to every
+# frame for about 3 s in the middle of each travel and for 13 s right after
+# one, while two other devices on the same stick answered throughout. The
+# default 4 attempts (retry=3) at 0.5 s cover ~2 s; 30 attempts cover ~15 s,
+# enough to outlast the longest gap seen. Retries of a user command are sent
+# back to back (they keep their priority, see _on_timeout), so the budget is
+# a time window, not a count that stretches with the queue - see issue #7.
+SLAT_ROOF_MOVE_RETRY = 29
 # How many times to retry reading a slat-roof motor's tilt range after the
 # one-shot read at startup failed. A retry is only attempted right after the
 # motor answered a position poll (i.e. while it is awake), so the attempts
@@ -222,6 +223,15 @@ class WmsMessage:
         self.on_end: Optional[Callable] = None
         self.queued_ts = time.time()
         self.com_ts: Optional[float] = None
+        # Set by _enqueue(priority=True); a retry of this message after a
+        # timeout keeps its place at the head of the queue instead of being
+        # appended behind the background position polls - see issue #7.
+        self.priority = False
+        # Set when a newer command for the same device made this one moot
+        # while it was in flight (sent, waiting for the reply or retrying).
+        # A superseded message is not retried after a timeout and its late
+        # reply must not update the device state - see issue #7.
+        self.superseded = False
 
     def apply_radio_mode(self, radio_mode: str) -> None:
         """Re-address a default-mode unicast frame with another radio mode."""
@@ -558,8 +568,11 @@ class WmsStick:
         )
 
         def _on_complete(error, msg_sent, msg_rcv):
-            # error is "" (empty string) on success, "timeout" on timeout
-            if error != "timeout":
+            # error is "" (empty string) on success, "timeout" on timeout and
+            # "superseded" when a newer command replaced this one in flight.
+            # A late reply to a superseded command must not touch the state
+            # either: the newer command's reply is the one that counts.
+            if not error and not msg_sent.superseded:
                 # Optimistically adopt the commanded angle. The position poll
                 # cannot read the slat angle back (returns 0xFF while raised), so
                 # without this the tilt state would never reflect what we just
@@ -600,6 +613,9 @@ class WmsStick:
         # went back to sleep) piles up multiple, sometimes contradictory,
         # targets that then fire one after another - see issue #7.
         self._remove_queued_msgs(cmd="blindMoveToPos", snr_hex=blind.snr_hex)
+        # The same for a blindMoveToPos that is already in flight: it must
+        # not be retried behind the new target - see _supersede_current_msg.
+        self._supersede_current_msg(cmd="blindMoveToPos", snr_hex=blind.snr_hex)
         self._enqueue(msg, priority=True)
         threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
 
@@ -680,13 +696,19 @@ class WmsStick:
             _LOGGER.warning("WmsStick: blind_stop: Cannot find blind '%s'", blind_id)
             return
 
-        # Remove pending commands for this blind
+        # Remove pending commands for this blind, and make sure a move that
+        # is in flight (sent, unanswered, retrying) is not re-sent after the
+        # stop - otherwise the motor stops and then sets off again towards
+        # the old target. See _supersede_current_msg / issue #7.
         self._remove_queued_msgs(snr_hex=blind.snr_hex)
+        self._supersede_current_msg(cmd="blindMoveToPos", snr_hex=blind.snr_hex)
 
         msg = WmsMessage("blindStopMove", blind.snr, {})
         if on_complete:
             msg.on_end = on_complete
-        self._enqueue(msg)
+        # A stop is the one command the user is waiting for right now; it
+        # goes ahead of the background position polls.
+        self._enqueue(msg, priority=True)
         # Kick the queue processor in case it is idle (e.g. after a delay_after period)
         threading.Timer(DELAY_MSG_PROC, self._process_queue).start()
 
@@ -1856,6 +1878,8 @@ class WmsStick:
         blind = self._blinds.get(msg.snr)
         if blind is not None:
             msg.apply_radio_mode(blind.radio_mode)
+        if priority:
+            msg.priority = True
         with self._queue_lock:
             if priority:
                 self._msg_queue.insert(0, msg)
@@ -1880,6 +1904,30 @@ class WmsStick:
                 else:
                     i += 1
         return removed
+
+    def _supersede_current_msg(self, cmd: str, snr_hex: str) -> bool:
+        """Mark the in-flight message as superseded if it matches cmd/snr.
+
+        ``_remove_queued_msgs`` only reaches messages still waiting in the
+        queue. A command that has already been sent and is waiting for its
+        reply (or retrying after a timeout) lives in ``_current_msg`` instead,
+        and until now a newer command for the same device could not touch it:
+        it kept retrying and, worse, each retry was appended to the *end* of
+        the queue, i.e. behind the newer command. The motor then received the
+        old target after the new one - the "executes the stuff later" and
+        "intermediate stop before continuing" of issue #7. Returns True when
+        a message was marked.
+        """
+        msg = self._current_msg
+        if msg is None or msg.superseded or msg.cmd != cmd or msg.snr != snr_hex:
+            return False
+        msg.superseded = True
+        _LOGGER.debug(
+            "WmsStick: in-flight %s snr=%s superseded by a newer command",
+            msg.cmd,
+            msg.snr,
+        )
+        return True
 
     def _has_queued_msg(self, cmd: str, snr_hex: str = None) -> bool:
         """Check if a message with the given cmd and optional snr_hex is queued.
@@ -2399,12 +2447,33 @@ class WmsStick:
             msg.retry,
         )
 
-        if msg.retry > 0:
-            # Retry: decrement counter and re-enqueue
+        if msg.superseded:
+            # A newer command for this device is already queued; retrying
+            # this one would deliver the stale target after the new one.
+            _LOGGER.debug(
+                "WmsStick: dropping superseded %s snr=%s after timeout",
+                msg.cmd,
+                msg.snr,
+            )
+            if msg.on_end:
+                try:
+                    msg.on_end("superseded", msg, None)
+                except Exception as exc:  # pylint: disable=broad-except
+                    _LOGGER.exception(
+                        "WmsStick: on_end superseded callback error: %s", exc
+                    )
+            self._current_msg = None
+            self._current_timeout_handle = None
+        elif msg.retry > 0:
+            # Retry: decrement counter and re-enqueue. A priority message
+            # (user command) keeps its place at the head of the queue; until
+            # now the retry was appended behind the background polls, so a
+            # command to a slow-to-answer motor was only re-sent after every
+            # other device had been polled - see issue #7.
             msg.retry -= 1
             self._current_msg = None
             self._current_timeout_handle = None
-            self._enqueue(msg)
+            self._enqueue(msg, priority=msg.priority)
         else:
             # No more retries
             if msg.on_end:
