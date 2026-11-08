@@ -87,6 +87,16 @@ All notable changes to this project will be documented in this file.
   travel and once for 13 s right after one, while the other devices kept
   answering; a tilt command to a slat roof is therefore now retried for up to
   about 15 s instead of 5 s, so a single tap outlasts such a gap.
+- **"Add a device by serial number" now asks several times per radio mode.**
+  The probe sent a single frame per key/transmission mode and waited 2 s.
+  The slat-roof motor of the same installation (issue #7) typically ignores
+  the first frame after an idle period and answers the second or third, so
+  one frame per mode said little about a light that lives in the same
+  family. Each mode is now tried with six frames at 0.5 s, and the two reads
+  that follow a successful probe (firmware/device type, product type) repeat
+  the same way. The whole probe can take about 20 s on a silent device; the
+  log line `probe_radio_mode … -> no answer (6 frames, 0.5 s each)` shows
+  each mode's result. (issue #8)
 - **"Gerätetyp" and "Softwareversion" diagnostic sensors are now translated.**
   Their names were hard-coded in German while every other entity follows the
   Home Assistant language; they now read "Device type" / "Software version"

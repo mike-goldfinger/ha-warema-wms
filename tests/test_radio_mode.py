@@ -26,6 +26,8 @@ sys.path.insert(
 from pywarema.stick import (  # noqa: E402
     BROADCAST_PAN_ID,
     DEFAULT_RADIO_MODE,
+    PROBE_FRAME_RETRY,
+    PROBE_FRAME_TIMEOUT,
     WmsMessage,
     WmsStick,
 )
@@ -85,8 +87,10 @@ class TestProbeRadioMode(unittest.TestCase):
     def _probe(self, answering: set[tuple[str, str]]):
         """Run the probe against a device answering the given (pan, mode) pairs."""
         current_pan = {"pan": self.stick.pan_id}
+        seen_kwargs = self.seen_kwargs = []
 
-        def fake_read(snr_hex, block, addr, size, timeout=3.0):
+        def fake_read(snr_hex, block, addr, size, timeout=3.0, **kwargs):
+            seen_kwargs.append(kwargs)
             hit = (current_pan["pan"], self.blind.radio_mode) in answering
             return b"\x01" if hit else None
 
@@ -113,6 +117,55 @@ class TestProbeRadioMode(unittest.TestCase):
         self.assertEqual(self._probe(set()), (None, None))
         self.assertEqual(self.pan_switches[-1], "ABCD")
         self.assertEqual(self.blind.radio_mode, DEFAULT_RADIO_MODE)
+
+    def test_probe_repeats_each_frame(self):
+        """One frame per mode says little on a device that duty-cycles its
+        receiver (issue #7's slat-roof motor misses most first frames); the
+        probe must ask several times per mode - see issue #8."""
+        self._probe(set())
+        self.assertTrue(self.seen_kwargs)
+        for kwargs in self.seen_kwargs:
+            self.assertEqual(kwargs.get("retry"), PROBE_FRAME_RETRY)
+            self.assertEqual(kwargs.get("frame_timeout"), PROBE_FRAME_TIMEOUT)
+
+
+class TestMb8ReadRetry(unittest.TestCase):
+    def setUp(self):
+        self.stick = make_stick()
+        self.blind = self.stick.blind_add(SNR, "probe")
+
+    def test_mb8_read_default_has_no_retry(self):
+        self.stick.mb8_read(SNR, block=81, addr=24, size=32)
+        msg = self.stick._msg_queue[-1]
+        self.assertEqual(msg.cmd, "mb8Read")
+        self.assertEqual(msg.retry, -1)
+
+    def test_mb8_read_retry_and_timeout_override(self):
+        self.stick.mb8_read(SNR, block=81, addr=24, size=32, retry=5, timeout=0.5)
+        msg = self.stick._msg_queue[-1]
+        self.assertEqual(msg.retry, 5)
+        self.assertEqual(msg.timeout, 0.5)
+
+    def test_sync_read_waits_for_all_frames(self):
+        """The blocking wrapper must not give up before the last retry."""
+        captured = {}
+
+        def fake_mb8_read(snr_hex, block, addr, size, on_complete=None, **kwargs):
+            captured.update(kwargs)
+            # Simulate the final timeout callback after all retries.
+            on_complete("timeout", None, None)
+
+        with patch.object(self.stick, "mb8_read", side_effect=fake_mb8_read):
+            with patch("pywarema.stick.threading.Event") as event_cls:
+                event_cls.return_value.wait.return_value = True
+                self.stick._mb8_read_sync(
+                    self.blind.snr_hex, 81, 24, 32, retry=5, frame_timeout=0.5
+                )
+                waited = event_cls.return_value.wait.call_args[0][0]
+        self.assertEqual(captured["retry"], 5)
+        self.assertEqual(captured["timeout"], 0.5)
+        # 6 frames x (0.5 s + queue delay) plus a 1 s margin
+        self.assertGreaterEqual(waited, 6 * 0.5 + 1.0)
 
 
 if __name__ == "__main__":
