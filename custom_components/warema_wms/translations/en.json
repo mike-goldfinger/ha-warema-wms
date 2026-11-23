@@ -229,7 +229,7 @@
     "abort": {
       "not_loaded": "The integration is not loaded. Make sure the WMS stick is connected and the integration is running, then try again.",
       "no_new_devices": "No new devices were found on the network. Make sure the new blinds/motors have been added to the WMS network and have completed a reference run (full open/close cycle).",
-      "no_configurable_devices": "No devices in this integration support firmware parameter configuration. Only Actuator UP (type 20), Plug Receiver (type 21) and Actuator 230V UP (type 2E) are supported.",
+      "no_configurable_devices": "No devices in this integration support firmware parameter configuration. Only Actuator UP (type 20), Plug Receiver (type 21), Actuator 24V UP (type 2D) and Actuator 230V UP (type 2E) are supported.",
       "invalid_device": "Selected device not recognized.",
       "cannot_read_params": "Failed to read parameters from the motor. The device may be unreachable. Wake the motor (e.g. with the handheld remote) and try again."
     }

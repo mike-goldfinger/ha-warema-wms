@@ -1421,7 +1421,7 @@ class WaremaWmsOptionsFlow(config_entries.OptionsFlow):
         return [
             d
             for d in devices
-            if d.get("device_type", "") in {"20", "21", "2E"}
+            if d.get("device_type", "") in {"20", "21", "2D", "2E"}
             and has_standard_param_layout(d.get("product_type"))
         ]
 

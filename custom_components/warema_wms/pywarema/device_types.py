@@ -32,6 +32,7 @@ DEVICE_TYPE_STRINGS: dict[str, str] = {
     "26": "Dimmer",
     "28": "Dimmer (smart)",
     "2A": "Radio motor (Lamellendach L60/L70)",
+    "2D": "Actuator 24V UP",
     "2E": "Actuator 230V UP",
     "30": "Plug receiver (new generation)",
     "31": "Dimmer 0-10 V",
@@ -44,7 +45,7 @@ DEVICE_TYPE_STRINGS: dict[str, str] = {
 # 30 is a newer plug receiver generation (WMS Studio still calls it
 # "Zwischenstecker"); it answers the scan like a 21 and drives an awning in
 # the field (issue #18). Treated like 21 for cover control.
-COVER_DEVICE_TYPES: set[str] = {"20", "21", "25", "2A", "2E", "30"}
+COVER_DEVICE_TYPES: set[str] = {"20", "21", "25", "2A", "2D", "2E", "30"}
 
 # Dimming actuators, exposed as light entities.
 #
@@ -79,7 +80,7 @@ SUPPORTED_DEVICE_TYPES: set[str] = COVER_DEVICE_TYPES | LIGHT_DEVICE_TYPES
 # Used ONLY as a fallback when we cannot read the per-device productType from
 # Block 37 (e.g. motor asleep during config_flow). The authoritative answer
 # comes from is_with_blinds in the device's productParameters.
-TILT_DEVICE_TYPES: set[str] = {"20", "2A", "2E"}
+TILT_DEVICE_TYPES: set[str] = {"20", "2A", "2D", "2E"}
 
 # Backwards-compatible alias for the cover set.
 BLIND_DEVICE_TYPES = COVER_DEVICE_TYPES
