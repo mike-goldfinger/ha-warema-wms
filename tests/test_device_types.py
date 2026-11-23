@@ -36,7 +36,7 @@ from pywarema.protocol import decode_frame  # noqa: E402
 
 class DeviceTypeRoutingTest(unittest.TestCase):
     def test_known_cover_types_route_to_cover(self):
-        for dt in ("20", "21", "25", "2A", "2E", "30"):
+        for dt in ("20", "21", "25", "2A", "2D", "2E", "30"):
             with self.subTest(device_type=dt):
                 self.assertTrue(is_cover_device(dt))
                 self.assertEqual(platform_for_device_type(dt), "cover")

@@ -31,7 +31,7 @@
 - 📶 **Connection quality** — A button per device asks the stick to measure the radio link; link quality and signal strength for both directions show up as diagnostic sensors
 - 🔌 **USB auto-detection** — Plug in your Warema WMS Stick and go
 - ⚙️ **Easy setup wizard** — Multiple discovery methods (manual, Wandsender pairing, new network)
-- 🌍 **Multiple device support** — Works with Type 20, 21, 25, 2A, 2E and 30 cover actuators, Type 26, 28 and 31 dimmers and Type 24 switching plug receivers
+- 🌍 **Multiple device support** — Works with Type 20, 21, 25, 2A, 2D, 2E and 30 cover actuators, Type 26, 28 and 31 dimmers and Type 24 switching plug receivers
 - 🎯 **Native Home Assistant integration** — Full cover entity support with all features
 - 🐍 **Native Python integration** — Pure Python, no external bridge, add-on or MQTT broker required
 - 🔐 **Local control only** — No cloud dependency, all communication is local
@@ -116,6 +116,7 @@ Any motor reachable from one of these WMS actuators:
 | **21** | Plug receiver |
 | **25** | Radio motor |
 | **2A** | Radio motor (Lamellendach L60/L70) |
+| **2D** | Actuator 24V UP |
 | **2E** | Actuator 230V UP |
 | **30** | Plug receiver (newer generation) |
 

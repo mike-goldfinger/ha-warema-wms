@@ -140,7 +140,7 @@
     "abort": {
       "not_loaded": "Die Integration ist nicht geladen. Sicherstellen dass der WMS Stick verbunden und die Integration aktiv ist.",
       "no_new_devices": "Keine neuen Geräte im Netzwerk gefunden. Sicherstellen dass neue Motoren im WMS-Netzwerk angemeldet sind und einen Referenzlauf (vollständiges Auf-/Zufahren) durchgeführt haben.",
-      "no_configurable_devices": "Keine Geräte in dieser Integration unterstützen die Motorparameter-Konfiguration. Nur Aktor AUF (Typ 20), Zwischenstecker (Typ 21) und Aktor 230V AUF (Typ 2E) werden unterstützt.",
+      "no_configurable_devices": "Keine Geräte in dieser Integration unterstützen die Motorparameter-Konfiguration. Nur Aktor UP (Typ 20), Zwischenstecker (Typ 21), Aktor 24V UP (Typ 2D) und Aktor 230V UP (Typ 2E) werden unterstützt.",
       "invalid_device": "Ausgewähltes Gerät nicht erkannt.",
       "cannot_read_params": "Parameter vom Motor konnten nicht gelesen werden. Motor über den Handsender aufwecken und erneut versuchen."
     }

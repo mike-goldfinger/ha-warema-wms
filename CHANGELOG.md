@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- **Device type `2D` (24V UP actor) is now supported **
+  basically the same as all the other cover actors but different type
 - **"Invert tilt" per device.** The options menu's display-direction step now
   also offers *Invert tilt*. The tilt direction is chosen per product
   (venetian blinds close towards the maximum slat angle, a slat roof towards
